@@ -1,0 +1,31 @@
+# Entorno local
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Base de datos local / migraciones temporales
+instance/
+*.sqlite3
+*.db
+
+# Dependencias / build local
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs y temporales
+*.log
+*.tmp
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Archivos de entorno de ejecución
+.env.local
+.env.*.local
