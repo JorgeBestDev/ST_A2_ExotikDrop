@@ -10,9 +10,14 @@ bp = Blueprint('products', __name__, url_prefix='/api/products')
 def serialize_product(product):
     return {
         'id': product.id,
+        'category_id': product.category_id,
+        'category': product.category.name if product.category else None,
         'name': product.name,
         'description': product.description,
-        'price': product.price,
+        'price': f'{product.price:.2f}',
+        'stock': product.stock,
+        'image_url': product.image_url,
+        'is_active': product.is_active,
         'created_at': product.created_at.isoformat() if product.created_at else None
     }
 
@@ -20,7 +25,7 @@ def serialize_product(product):
 @bp.route('', methods=['GET'])
 @bp.route('/', methods=['GET'])
 def get_products():
-    products = Product.query.order_by(Product.id.asc()).all()
+    products = Product.query.filter_by(is_active=True).order_by(Product.id.asc()).all()
     return jsonify({
         'success': True,
         'data': [serialize_product(product) for product in products],

@@ -1,32 +1,47 @@
 import './App.css'
+import { useEffect, useState } from 'react'
 
 type Product = {
+  id: number
+  category_id: number
+  category: string | null
   name: string
   price: string
-  image: string
-  tag?: string
+  image_url: string | null
 }
 
-const products: Product[] = [
-  { name: 'Air Jordan 1 Retro Low OG “Mocha”', price: '$160.00', image: 'https://images.unsplash.com/photo-1552346154-21d32810aba3?auto=format&fit=crop&w=800&q=85' },
-  { name: 'adidas Samba OG “Cream Black”', price: '$120.00', image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=85' },
-  { name: 'ExitDrop Washed Hoodie', price: '$89.00', image: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=800&q=85' },
-  { name: 'ExitDrop Cargo Pants “Brown”', price: '$99.00', image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=85' },
-  { name: 'ExitDrop Logo Cap', price: '$39.00', image: 'https://images.unsplash.com/photo-1521369909029-2afed882baee?auto=format&fit=crop&w=800&q=85' },
-]
-
-const categories = [
-  { title: 'Sneakers', image: products[0].image },
-  { title: 'Hoodies', image: products[2].image },
-  { title: 'T-Shirts', image: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=800&q=85' },
-  { title: 'Pants', image: products[3].image },
-  { title: 'Hats & Accessories', image: products[4].image },
-]
+type Category = { id: number; name: string; image_url: string | null }
+const API_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 const Arrow = () => <span className="arrow">→</span>
 const Heart = () => <span className="heart" aria-label="Add to wishlist">♡</span>
 
 function App() {
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [apiError, setApiError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const loadStoreData = async () => {
+      try {
+        const [productsResponse, categoriesResponse] = await Promise.all([
+          fetch(`${API_URL}/products`),
+          fetch(`${API_URL}/categories`),
+        ])
+        if (!productsResponse.ok || !categoriesResponse.ok) {
+          throw new Error('The store API is unavailable.')
+        }
+        const productsPayload = await productsResponse.json()
+        const categoriesPayload = await categoriesResponse.json()
+        setProducts(productsPayload.data)
+        setCategories(categoriesPayload.data)
+      } catch (error) {
+        setApiError(error instanceof Error ? error.message : 'Unable to load store data.')
+      }
+    }
+    void loadStoreData()
+  }, [])
+
   return (
     <div className="store">
       <div className="shipping-bar">FREE SHIPPING ON ORDERS OVER $150 <span>•</span> EASY 30-DAY RETURNS <span>•</span> PAY LATER WITH AFTERPAY</div>
@@ -41,7 +56,7 @@ function App() {
       <main id="top">
         <section className="hero">
           <div className="hero-content">
-            <p className="eyebrow">Sole. Style. District.</p>
+            <p className="eyebrow">Exit. Style. District.</p>
             <h1>BUILT ON<br />CULTURE.<br /><strong>WORN BY YOU.</strong></h1>
             <p className="hero-subtitle">Curated sneakers and streetwear<br />for those who set the pace.</p>
             <div className="hero-buttons"><a className="button button-brown" href="#new">Shop New Arrivals</a><a className="button button-outline" href="#apparel">Shop Apparel</a></div>
@@ -51,12 +66,12 @@ function App() {
 
         <section className="category-section section-light" id="sneakers">
           <div className="category-intro"><p className="eyebrow">Shop by category</p><h2>EXPLORE OUR<br />WORLD</h2><a className="button button-dark" href="#apparel">View all categories</a></div>
-          <div className="category-grid">{categories.map((category) => <a className="category-card" href="#new" key={category.title}><div className="category-image" style={{ backgroundImage: `url(${category.image})` }} /><h3>{category.title}</h3><span>Shop now <Arrow /></span></a>)}</div>
+          <div className="category-grid">{categories.map((category) => <a className="category-card" href="#new" key={category.id}><div className="category-image" style={{ backgroundImage: `url(${category.image_url ?? ''})` }} /><h3>{category.name}</h3><span>Shop now <Arrow /></span></a>)}</div>
         </section>
 
         <section className="drops section-dark" id="new">
-          <div className="section-heading"><div><p className="eyebrow">New drops</p><h2>JUST LANDED</h2><p>The latest heat. Fresh styles.<br />Limited quantities.</p></div><a className="button button-brown" href="#new">Shop all new drops</a></div>
-          <div className="product-grid">{products.map((product) => <article className="product-card" key={product.name}><div className="product-photo" style={{ backgroundImage: `url(${product.image})` }}><Heart /></div><h3>{product.name}</h3><strong>{product.price}</strong></article>)}</div>
+          <div className="section-heading"><div><p className="eyebrow">New drops</p><h2>JUST LANDED</h2><p>The latest heat. Fresh styles.<br />Limited quantities.</p>{apiError && <small className="api-error">{apiError}</small>}</div><a className="button button-brown" href="#new">Shop all new drops</a></div>
+          <div className="product-grid">{products.map((product) => <article className="product-card" key={product.id}><div className="product-photo" style={{ backgroundImage: `url(${product.image_url ?? ''})` }}><Heart /></div><h3>{product.name}</h3><strong>${product.price}</strong></article>)}</div>
           <div className="slider-dots"><i /><i className="active" /><i /><i /></div>
         </section>
 
