@@ -10,6 +10,10 @@ def serialize_category(category):
         'id': category.id,
         'name': category.name,
         'description': category.description,
+        'image_url': next(
+            (product.image_url for product in category.products if product.image_url),
+            None,
+        ),
     }
 
 

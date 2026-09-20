@@ -188,6 +188,87 @@ Los modelos principales son:
 - created_at
 - relación con user
 
+## 5.1. Estructura de la base de datos
+
+La base de datos de ExitDrop está diseñada para cubrir el ciclo completo de un
+e-commerce de productos limitados: usuarios, catálogo, drops, carritos,
+pedidos y pagos. Cada modelo de SQLAlchemy representa una tabla y las claves
+foráneas mantienen la relación entre los módulos.
+
+### Diagrama entidad-relación
+
+El siguiente diagrama resume las tablas, sus campos principales y las
+relaciones del esquema:
+
+![Diagrama de la base de datos de ExitDrop](./docs/database-schema.jfif)
+
+### Entidades y responsabilidades
+
+| Tabla | Responsabilidad | Relaciones principales |
+| --- | --- | --- |
+| `users` | Registra clientes y administradores. | Un usuario puede tener muchos `carts`, `orders` y `password_reset_tokens`. |
+| `categories` | Clasifica los productos del catálogo. | Una categoría contiene muchos `products`. |
+| `drops` | Agrupa lanzamientos con fechas y estado. | Un drop puede publicar muchos `products`. |
+| `products` | Contiene el inventario que se muestra en la tienda. | Pertenece a una categoría y opcionalmente a un drop; se relaciona con carritos y pedidos. |
+| `carts` | Representa el carrito de un usuario. | Pertenece a un usuario y contiene muchos `cart_items`. |
+| `cart_items` | Guarda los productos y cantidades elegidos en un carrito. | Une `carts` con `products`; la combinación `cart_id` + `product_id` es única. |
+| `orders` | Guarda la compra confirmada y su estado. | Pertenece a un usuario y contiene muchos `order_items`; puede tener un pago. |
+| `order_items` | Conserva el detalle de una compra. | Une `orders` con `products` y guarda el precio aplicado al momento de comprar. |
+| `payments` | Registra el método, importe y estado del pago. | Se relaciona con una orden. |
+| `password_reset_tokens` | Permite gestionar recuperación de contraseñas. | Cada token pertenece a un usuario. |
+
+### Claves y relaciones
+
+- Las columnas `id` son las claves primarias de cada tabla.
+- `products.category_id` referencia a `categories.id`.
+- `products.drop_id` referencia a `drops.id` y es opcional porque un producto
+  puede existir fuera de un lanzamiento.
+- `carts.user_id` y `orders.user_id` referencia a `users.id`.
+- `cart_items.cart_id` y `cart_items.product_id` conectan un carrito con sus
+  productos. La restricción `uq_cart_product` evita repetir el mismo producto
+  dentro del carrito.
+- `order_items.order_id` y `order_items.product_id` conectan una orden con
+  sus productos. La restricción `uq_order_product` evita duplicar un producto
+  dentro de la misma orden.
+- `payments.order_id` conecta el pago con la orden correspondiente.
+- `password_reset_tokens.user_id` conecta cada token con su usuario.
+
+### Flujo de datos de una compra
+
+1. El usuario consulta `categories` y `products` desde el catálogo.
+2. El frontend crea o recupera un registro en `carts`.
+3. Cada selección se guarda en `cart_items` con su cantidad.
+4. Al confirmar la compra, se crea una fila en `orders`.
+5. Los elementos del carrito pasan a `order_items`, conservando `unit_price` y
+   `total_price` para mantener el historial aunque cambie el precio del
+   producto.
+6. El resultado del cobro se registra en `payments` y actualiza el estado de
+   la orden.
+
+### Entornos y migraciones
+
+- **Desarrollo local:** si `DATABASE_URL` no está definida, Flask utiliza
+  `instance/exitdrop-dev.sqlite3`.
+- **Neon/PostgreSQL:** cuando `DATABASE_URL` contiene una URL de PostgreSQL,
+  `app/config.py` normaliza el driver a `postgresql+psycopg2`.
+- **Migraciones:** Flask-Migrate/Alembic versiona los cambios de esquema en
+  `migrations/versions`. La revisión debe ejecutarse con:
+
+  ```bash
+  flask --app app.py db upgrade
+  ```
+
+- Antes de desplegar una nueva revisión conviene comprobar el estado con:
+
+  ```bash
+  flask --app app.py db current
+  flask --app app.py db check
+  ```
+
+La imagen del diagrama se conserva en
+[`docs/database-schema.jfif`](./docs/database-schema.jfif), de modo que la
+documentación funciona tanto en GitHub como en una copia local del proyecto.
+
 ## 6. Endpoints de la API
 
 La API se expone bajo prefijo /api.
