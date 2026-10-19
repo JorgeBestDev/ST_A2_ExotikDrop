@@ -1,104 +1,46 @@
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import './App.css'
-import { useEffect, useState } from 'react'
+import './flows.css'
+import './cart-checkout.css'
+import AccountPage from './AccountPage'
+import AuthPage from './AuthPage'
+import { CheckoutPage, OrderConfirmationPage } from './CheckoutPage'
+import HomePage from './HomePage'
+import ProductPage from './ProductPage'
+import { StoreProvider } from './StoreContext'
+import { useStore } from './store-context'
+import StoreLayout from './StoreLayout'
 
-type Product = {
-  id: number
-  category_id: number
-  category: string | null
-  name: string
-  price: string
-  image_url: string | null
+function AccountGate({ children }: { children: ReactNode }) {
+  const { user, authReady } = useStore()
+  const location = useLocation()
+  if (!authReady) return <main className="flow-page"><p>Loading your account…</p></main>
+  if (!user) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />
+  return children
 }
 
-type Category = { id: number; name: string; image_url: string | null }
-const API_URL = import.meta.env.VITE_API_URL ?? '/api'
+function NotFound() {
+  return <main className="flow-page"><section className="flow-card"><p className="eyebrow">Not found</p><h1>This page has left the district.</h1><Link className="button button-dark" to="/">Return home</Link></section></main>
+}
 
-const Arrow = () => <span className="arrow">→</span>
-const Heart = () => <span className="heart" aria-label="Add to wishlist">♡</span>
+function AppRoutes() {
+  return <Routes>
+    <Route element={<StoreLayout />}>
+      <Route index element={<HomePage />} />
+      <Route path="products/:productId" element={<ProductPage />} />
+      <Route path="checkout" element={<CheckoutPage />} />
+      <Route path="orders/:orderId/confirmation" element={<AccountGate><OrderConfirmationPage /></AccountGate>} />
+      <Route path="login" element={<AuthPage mode="login" />} />
+      <Route path="register" element={<AuthPage mode="register" />} />
+      <Route path="account" element={<AccountGate><AccountPage /></AccountGate>} />
+      <Route path="*" element={<NotFound />} />
+    </Route>
+  </Routes>
+}
 
 function App() {
-  const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
-  const [apiError, setApiError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const loadStoreData = async () => {
-      try {
-        const [productsResponse, categoriesResponse] = await Promise.all([
-          fetch(`${API_URL}/products`),
-          fetch(`${API_URL}/categories`),
-        ])
-        if (!productsResponse.ok || !categoriesResponse.ok) {
-          throw new Error('The store API is unavailable.')
-        }
-        const productsPayload = await productsResponse.json()
-        const categoriesPayload = await categoriesResponse.json()
-        setProducts(productsPayload.data)
-        setCategories(categoriesPayload.data)
-      } catch (error) {
-        setApiError(error instanceof Error ? error.message : 'Unable to load store data.')
-      }
-    }
-    void loadStoreData()
-  }, [])
-
-  return (
-    <div className="store">
-      <div className="shipping-bar">FREE SHIPPING ON ORDERS OVER $150 <span>•</span> EASY 30-DAY RETURNS <span>•</span> PAY LATER WITH AFTERPAY</div>
-      <header className="header">
-        <a className="logo" href="#top">Exit<span>Drop.</span></a>
-        <nav>
-          <a href="#new">New Arrivals</a><a href="#sneakers">Sneakers</a><a href="#apparel">Apparel</a><a href="#accessories">Accessories</a><a href="#story">Brands</a><a href="#new">Sale</a>
-        </nav>
-        <div className="header-actions"><button aria-label="Search">⌕</button><button aria-label="Account">♙</button><button aria-label="Wishlist">♡</button><button aria-label="Cart">▢<b>0</b></button></div>
-      </header>
-
-      <main id="top">
-        <section className="hero">
-          <div className="hero-content">
-            <p className="eyebrow">Exit. Style. District.</p>
-            <h1>BUILT ON<br />CULTURE.<br /><strong>WORN BY YOU.</strong></h1>
-            <p className="hero-subtitle">Curated sneakers and streetwear<br />for those who set the pace.</p>
-            <div className="hero-buttons"><a className="button button-brown" href="#new">Shop New Arrivals</a><a className="button button-outline" href="#apparel">Shop Apparel</a></div>
-          </div>
-          <div className="hero-image" />
-        </section>
-
-        <section className="category-section section-light" id="sneakers">
-          <div className="category-intro"><p className="eyebrow">Shop by category</p><h2>EXPLORE OUR<br />WORLD</h2><a className="button button-dark" href="#apparel">View all categories</a></div>
-          <div className="category-grid">{categories.map((category) => <a className="category-card" href="#new" key={category.id}><div className="category-image" style={{ backgroundImage: `url(${category.image_url ?? ''})` }} /><h3>{category.name}</h3><span>Shop now <Arrow /></span></a>)}</div>
-        </section>
-
-        <section className="drops section-dark" id="new">
-          <div className="section-heading"><div><p className="eyebrow">New drops</p><h2>JUST LANDED</h2><p>The latest heat. Fresh styles.<br />Limited quantities.</p>{apiError && <small className="api-error">{apiError}</small>}</div><a className="button button-brown" href="#new">Shop all new drops</a></div>
-          <div className="product-grid">{products.map((product) => <article className="product-card" key={product.id}><div className="product-photo" style={{ backgroundImage: `url(${product.image_url ?? ''})` }}><Heart /></div><h3>{product.name}</h3><strong>${product.price}</strong></article>)}</div>
-          <div className="slider-dots"><i /><i className="active" /><i /><i /></div>
-        </section>
-
-        <section className="story" id="story">
-          <div className="story-photo" />
-          <div className="story-copy"><p className="eyebrow">Our story</p><h2>MORE THAN A BRAND.<br />IT&apos;S A MOVEMENT.</h2><p>ExitDrop was built for the culture. Inspired by the streets, driven by community. We curate what&apos;s real and authentic—so you can wear your story.</p><a className="button button-outline" href="#community">Learn more about us</a></div>
-          <div className="story-values"><div>♢ <span>Curated<br />quality</span></div><div>♧ <span>Limited<br />releases</span></div><div>◉ <span>Culture<br />first</span></div><div>♙ <span>Community<br />driven</span></div></div>
-        </section>
-
-        <section className="featured-drop">
-          <div className="featured-shoe" />
-          <div className="featured-copy"><p className="eyebrow">Limited release</p><h2>AIR JORDAN 1 HIGH OG “MOCHA”</h2><p>Iconic colorway. Timeless energy.<br />Strictly limited.</p><div className="countdown"><span>02<small>days</small></span><span>14<small>hrs</small></span><span>37<small>mins</small></span><span>48<small>secs</small></span></div></div>
-          <div className="featured-buy"><strong>$180.00</strong><a className="button button-brown" href="#community">Notify me</a><small>Limited to 1 per customer</small></div>
-        </section>
-
-        <section className="community section-light" id="community">
-          <div className="community-intro"><p className="eyebrow">Real people. Real style.</p><h2>WHAT OUR COMMUNITY<br />SAYS</h2><a className="button button-dark" href="#community">View all reviews</a><div className="rating">★★★★★ <small>4.9 / 5 from 3,200+ reviews</small></div></div>
-          <div className="reviews"><blockquote>“<p>ExitDrop always comes through with the heat and the service. My go-to for exclusive drops!</p><footer>— Marcus T.</footer><b>★★★★★</b></blockquote><blockquote>“<p>The quality is unmatched and the pieces hit different in person. 10/10 recommend.</p><footer>— Jasmine R.</footer><b>★★★★★</b></blockquote><blockquote>“<p>Fast shipping, dope packaging, and legit products. You&apos;ve got a customer for life.</p><footer>— Daniel K.</footer><b>★★★★★</b></blockquote></div>
-        </section>
-
-        <section className="guides section-dark" id="apparel"><div className="section-heading"><div><p className="eyebrow">Style guide</p><h2>INSPO FROM THE DISTRICT</h2><p>Outfit ideas, culture stories, and style tips<br />to keep you ahead of the game.</p></div><a className="button button-brown" href="#apparel">View all articles</a></div><div className="article-grid"><article><div className="article-image article-one" /><small>MAY 12, 2024</small><h3>5 WAYS TO STYLE CARGO<br />PANTS THIS SEASON</h3><span>Read more →</span></article><article><div className="article-image article-two" /><small>MAY 5, 2024</small><h3>WHY NEUTRALS ARE ALWAYS<br />A GOOD IDEA</h3><span>Read more →</span></article><article><div className="article-image article-three" /><small>APR 18, 2024</small><h3>THE RISE OF STREETWEAR:<br />THEN &amp; NOW</h3><span>Read more →</span></article></div></section>
-
-        <section className="newsletter section-light"><div><h2>STAY IN THE DISTRICT</h2><p>Be the first to know about new drops, exclusive offers,<br />and culture content.</p></div><div className="email-box"><input placeholder="Enter your email address" /><button>SIGN UP</button><div><span>◯ Exclusive access</span><span>◯ Early drops</span><span>◯ Special offers</span></div></div><div className="newsletter-mark">SD</div></section>
-      </main>
-      <footer className="footer"><div><a className="logo" href="#top">Exit<span>Drop.</span></a><p>Curated sneakers and streetwear<br />for the culture. Join the movement.</p><div className="socials">◎ ♫ ◉ ▶</div></div><div><b>SHOP</b><a href="#new">New Arrivals</a><a href="#sneakers">Sneakers</a><a href="#apparel">Apparel</a><a href="#accessories">Accessories</a></div><div><b>CUSTOMER CARE</b><a href="#top">Contact Us</a><a href="#top">Shipping &amp; Delivery</a><a href="#top">Returns &amp; Exchanges</a><a href="#top">FAQ</a></div><div><b>ABOUT</b><a href="#story">Our Story</a><a href="#story">Careers</a><a href="#story">Store Locator</a><a href="#story">Privacy Policy</a></div><div><b>GET THE APP</b><div className="app-badges"> App Store<br />▶ Google Play</div></div><small className="copyright">© 2024 ExitDrop. All Rights Reserved.</small></footer>
-    </div>
-  )
+  return <BrowserRouter><StoreProvider><AppRoutes /></StoreProvider></BrowserRouter>
 }
 
 export default App

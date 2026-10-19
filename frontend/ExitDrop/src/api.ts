@@ -1,0 +1,27 @@
+const API_URL = import.meta.env.VITE_API_URL ?? '/api'
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+export async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    },
+  })
+  const payload = await response.json().catch(() => null) as { success?: boolean; message?: string; data?: T } | null
+  if (!response.ok || payload?.success === false) {
+    throw new ApiError(payload?.message ?? `Request failed with status ${response.status}`, response.status)
+  }
+  return payload?.data as T
+}

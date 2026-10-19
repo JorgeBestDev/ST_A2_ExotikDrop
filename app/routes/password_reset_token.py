@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify
+from flask_login import current_user, login_required
 
 from app.models.password_reset_tokens import PasswordResetToken
 
@@ -16,8 +17,9 @@ def serialize_password_reset_token(token_record):
 
 @bp.route('', methods=['GET'])
 @bp.route('/', methods=['GET'])
+@login_required
 def get_password_reset_tokens():
-    tokens = PasswordResetToken.query.order_by(PasswordResetToken.id.asc()).all()
+    tokens = PasswordResetToken.query.filter_by(user_id=current_user.id).order_by(PasswordResetToken.id.asc()).all()
     return jsonify({
         'success': True,
         'data': [serialize_password_reset_token(token_record) for token_record in tokens],
@@ -26,8 +28,9 @@ def get_password_reset_tokens():
 
 
 @bp.route('/<int:token_id>', methods=['GET'])
+@login_required
 def get_password_reset_token(token_id):
-    token_record = PasswordResetToken.query.get(token_id)
+    token_record = PasswordResetToken.query.filter_by(id=token_id, user_id=current_user.id).first()
 
     if token_record is None:
         return jsonify({

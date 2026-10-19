@@ -160,6 +160,14 @@ Los modelos principales son:
 - user_id
 - total
 - status
+- shipping_recipient
+- shipping_phone
+- shipping_line1
+- shipping_line2
+- shipping_city
+- shipping_region
+- shipping_postal_code
+- shipping_country
 - created_at
 - relaciones: user, items, payment
 
@@ -185,6 +193,21 @@ Los modelos principales son:
 - id
 - user_id
 - token
+- created_at
+- relación con user
+
+### ShippingAddress
+- id
+- user_id
+- recipient
+- phone
+- line1
+- line2
+- city
+- region
+- postal_code
+- country
+- is_default
 - created_at
 - relación con user
 
@@ -258,6 +281,8 @@ relaciones del esquema:
   flask --app app.py db upgrade
   ```
 
+- Se conserva un puente compatible para bases locales que aún estén marcadas
+  con la revisión anterior `08f172200668`; no recrea ni elimina tablas.
 - Antes de desplegar una nueva revisión conviene comprobar el estado con:
 
   ```bash
@@ -281,6 +306,23 @@ La API se expone bajo prefijo /api.
 - PUT /api/users/<user_id>
 - DELETE /api/users/<user_id>
 
+### Sesión y cuenta
+
+- POST /api/auth/register
+- POST /api/auth/login
+- POST /api/auth/logout
+- GET /api/auth/me
+- PUT /api/account/profile
+- PUT /api/account/password
+- GET /api/account/addresses
+- POST /api/account/addresses
+- PUT /api/account/addresses/<address_id>
+- DELETE /api/account/addresses/<address_id>
+- GET /api/account/payment-methods
+
+Las rutas privadas usan sesiones Flask con cookies HttpOnly y limitan los
+pedidos, carritos y direcciones al usuario autenticado.
+
 ### Productos
 
 - GET /api/products
@@ -301,6 +343,14 @@ La API se expone bajo prefijo /api.
 - GET /api/carts
 - GET /api/carts/<cart_id>
 
+### Carrito de la tienda
+
+- GET /api/cart
+- POST /api/cart/items
+- PUT /api/cart/items/<item_id>
+- DELETE /api/cart/items/<item_id>
+- POST /api/cart/merge
+
 ### Cart items
 
 - GET /api/cart-items
@@ -310,6 +360,7 @@ La API se expone bajo prefijo /api.
 
 - GET /api/orders
 - GET /api/orders/<order_id>
+- POST /api/orders (checkout local con método `simulated_card`)
 
 ### Order items
 
@@ -361,15 +412,18 @@ Esto facilita la integración con React y la renderización de errores desde el 
 - PostgreSQL + psycopg2-binary
 - Werkzeug para hashing de contraseñas
 
-### Frontend (planificado)
-- React
+### Frontend
+- React + TypeScript
 - Vite
-- JavaScript/JSX (estructura inicial pensada para React)
-- consumo de endpoints REST mediante fetch o axios
+- React Router
+- consumo de endpoints REST con `fetch`
 
 ## 9. Variables de entorno
 
-El proyecto usa un archivo .env para configurar la aplicación. La base de datos se gestiona con DATABASE_URL y se normaliza en app/config.py para asegurar compatibilidad con PostgreSQL y psycopg2.
+El proyecto usa `.env` para configurar la aplicación. Si `DATABASE_URL` no está
+definida, Flask utiliza SQLite en `instance/exitdrop-dev.sqlite3`. Para Neon o
+PostgreSQL, configura `DATABASE_URL` con la URL de conexión y no publiques el
+archivo `.env` ni sus credenciales.
 
 Ejemplo:
 
@@ -380,33 +434,69 @@ CORS_ORIGINS=http://localhost:5173
 DEBUG=True
 ```
 
-## 10. Cómo ejecutar el backend
+El método de pago del checkout actual es una simulación. No se solicita ni se
+almacena el número de tarjeta o su código de seguridad.
 
-Desde la carpeta Backend:
+## 10. Cómo ejecutar el proyecto en desarrollo
+
+### Backend y base de datos
+
+Desde la raíz del repositorio:
 
 ```bash
-python -m venv venv
-.\venv\Scripts\activate
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+flask --app app.py db upgrade
+python scripts/seed_dev_db.py
 python app.py
 ```
 
-También se puede arrancar con Flask:
+Si `DATABASE_URL` no está configurada, los comandos preparan la base SQLite
+local. El script de seed se puede repetir sin duplicar productos y categorías.
+La API queda disponible en `http://localhost:5000/api`.
+
+### Frontend
+
+En otra terminal:
 
 ```bash
-flask --app app run
+cd frontend/ExitDrop
+npm install
+npm run dev
+```
+
+Vite publica la interfaz en `http://localhost:5173` y redirige las solicitudes
+`/api` al backend. La sesión usa una cookie HttpOnly.
+
+### Pruebas y validaciones
+
+Desde la raíz:
+
+```bash
+python -m pytest
+```
+
+Desde `frontend/ExitDrop`:
+
+```bash
+npm run build
+npm run lint
 ```
 
 ## 11. Estado actual del proyecto
 
-El backend se encuentra en una fase funcional y modular, con:
+El proyecto cuenta con:
 
 - app factory estructurada
 - modelos principales creados
 - blueprints registrados
-- endpoints GET funcionando para recursos principales
-- CRUD de usuarios implementado
-- preparación para integración con frontend React
+- migraciones con Flask-Migrate/Alembic
+- catálogo React conectado a productos y categorías del API
+- detalle de producto, carrito invitado y carrito persistente para usuarios
+- registro, inicio/cierre de sesión y gestión de perfil y direcciones
+- checkout de desarrollo que crea pedidos y registra únicamente el método/estado simulado
+- historial de pedidos y actividad de pagos en la cuenta
 
 ## 12. Roadmap futuro
 
@@ -416,11 +506,9 @@ El backend se encuentra en una fase funcional y modular, con:
 - asegurar buenas prácticas de serialización y middleware
 
 ### Fase 2: integración con React
-- crear dashboard administrativo
-- construir catálogo público
-- pantalla de detalle de producto
-- carrito y checkout
-- login y registro de usuarios
+- conectar una pasarela de pago real cuando se definan proveedor y requisitos
+- completar la administración de inventario, drops y contenido del catálogo
+- mejorar recuperación de contraseña y cobertura de pruebas
 
 ### Fase 3: despliegue y producción
 - configurar PostgreSQL en entorno real
