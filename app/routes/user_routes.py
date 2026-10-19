@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from flask_login import current_user, login_required
 from werkzeug.security import generate_password_hash
 
 from app.extensions import db
@@ -19,7 +20,10 @@ def serialize_user(user):
 
 @bp.route('', methods=['GET'])
 @bp.route('/', methods=['GET'])
+@login_required
 def get_users():
+    if not current_user.is_admin:
+        return jsonify(success=False, message='No tienes permiso para consultar usuarios'), 403
     users = User.query.order_by(User.id.asc()).all()
     return jsonify({
         'success': True,
@@ -29,7 +33,10 @@ def get_users():
 
 
 @bp.route('/<int:user_id>', methods=['GET'])
+@login_required
 def get_user(user_id):
+    if current_user.id != user_id and not current_user.is_admin:
+        return jsonify(success=False, message='No tienes permiso para consultar este usuario'), 403
     user = User.query.get(user_id)
 
     if user is None:
@@ -52,8 +59,6 @@ def create_user():
     email = (data.get('email') or '').strip()
     password = data.get('password')
     full_name = (data.get('full_name') or '').strip()
-    is_admin = bool(data.get('is_admin', False))
-
     if not email or not password or not full_name:
         return jsonify({
             'success': False,
@@ -70,7 +75,7 @@ def create_user():
         email=email,
         password_hash=generate_password_hash(password),
         full_name=full_name,
-        is_admin=is_admin
+        is_admin=False,
     )
 
     db.session.add(user)
@@ -84,7 +89,10 @@ def create_user():
 
 
 @bp.route('/<int:user_id>', methods=['PUT'])
+@login_required
 def update_user(user_id):
+    if current_user.id != user_id and not current_user.is_admin:
+        return jsonify(success=False, message='No tienes permiso para actualizar este usuario'), 403
     data = request.get_json(silent=True) or {}
     user = User.query.get(user_id)
 
@@ -93,6 +101,11 @@ def update_user(user_id):
             'success': False,
             'message': 'Usuario no encontrado'
         }), 404
+
+    if 'is_admin' in data and not current_user.is_admin:
+        return jsonify(success=False, message='No tienes permiso para cambiar privilegios'), 403
+    if 'password' in data and data.get('password') and not current_user.is_admin:
+        return jsonify(success=False, message='Usa la ruta de cambio de contraseña de la cuenta'), 400
 
     if 'email' in data and data.get('email'):
         email = data['email'].strip()
@@ -106,7 +119,7 @@ def update_user(user_id):
     if 'full_name' in data and data.get('full_name'):
         user.full_name = data['full_name'].strip()
 
-    if 'is_admin' in data:
+    if 'is_admin' in data and current_user.is_admin:
         user.is_admin = bool(data.get('is_admin'))
 
     if 'password' in data and data.get('password'):
@@ -122,7 +135,10 @@ def update_user(user_id):
 
 
 @bp.route('/<int:user_id>', methods=['DELETE'])
+@login_required
 def delete_user(user_id):
+    if not current_user.is_admin:
+        return jsonify(success=False, message='No tienes permiso para eliminar usuarios'), 403
     user = User.query.get(user_id)
 
     if user is None:

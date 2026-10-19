@@ -8,6 +8,7 @@ from app.models.orders import Order
 from app.models.order_items import OrderItem
 from app.models.payments import Payment
 from app.models.password_reset_tokens import PasswordResetToken
+from app.models.shipping_addresses import ShippingAddress
 
 __all__ = [
     'User',
@@ -20,4 +21,5 @@ __all__ = [
     'OrderItem',
     'Payment',
     'PasswordResetToken',
+    'ShippingAddress',
 ]

@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
 
+from flask_login import UserMixin
+
 from app.extensions import db
 
 
-class User(db.Model):
+class User(UserMixin, db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -16,6 +18,7 @@ class User(db.Model):
     orders = db.relationship('Order', back_populates='user', cascade='all, delete-orphan')
     carts = db.relationship('Cart', back_populates='user', cascade='all, delete-orphan')
     password_reset_tokens = db.relationship('PasswordResetToken', back_populates='user', cascade='all, delete-orphan')
+    addresses = db.relationship('ShippingAddress', back_populates='user', cascade='all, delete-orphan')
 
     def __repr__(self):
         return f'<User {self.email}>'

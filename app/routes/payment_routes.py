@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify
+from flask_login import current_user, login_required
 
+from app.models.orders import Order
 from app.models.payments import Payment
 
 bp = Blueprint('payments', __name__, url_prefix='/api/payments')
@@ -18,8 +20,9 @@ def serialize_payment(payment):
 
 @bp.route('', methods=['GET'])
 @bp.route('/', methods=['GET'])
+@login_required
 def get_payments():
-    payments = Payment.query.order_by(Payment.id.asc()).all()
+    payments = Payment.query.join(Order).filter(Order.user_id == current_user.id).order_by(Payment.id.asc()).all()
     return jsonify({
         'success': True,
         'data': [serialize_payment(payment) for payment in payments],
@@ -28,8 +31,12 @@ def get_payments():
 
 
 @bp.route('/<int:payment_id>', methods=['GET'])
+@login_required
 def get_payment(payment_id):
-    payment = Payment.query.get(payment_id)
+    payment = Payment.query.join(Order).filter(
+        Payment.id == payment_id,
+        Order.user_id == current_user.id,
+    ).first()
 
     if payment is None:
         return jsonify({

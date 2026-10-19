@@ -34,7 +34,7 @@ def get_products():
     
 @bp.route('/<int:product_id>', methods=['GET'])
 def get_product(product_id):
-    product = Product.query.get(product_id)
+    product = Product.query.filter_by(id=product_id, is_active=True).first()
 
     if product is None:
         return jsonify({
