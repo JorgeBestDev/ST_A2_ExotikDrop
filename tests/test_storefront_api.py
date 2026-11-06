@@ -1,7 +1,9 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.categories import Category
+from app.models.drops import Drop
 from app.models.products import Product
 
 
@@ -43,6 +45,35 @@ def create_address(client):
         'postal_code': '12345',
         'country': 'Test Country',
     })
+
+
+def create_drop(app, name, status, starts_at, ends_at, with_product=True):
+    with app.app_context():
+        category = Category(name=f'{name} category')
+        db.session.add(category)
+        db.session.flush()
+        drop = Drop(
+            name=name,
+            description=f'{name} description',
+            status=status,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+        db.session.add(drop)
+        db.session.flush()
+        if with_product:
+            db.session.add(Product(
+                category_id=category.id,
+                drop_id=drop.id,
+                name=f'{name} product',
+                description='Drop product preview',
+                price=Decimal('180.00'),
+                stock=4,
+                image_url='https://example.test/drop.jpg',
+                is_active=True,
+            ))
+        db.session.commit()
+        return drop.id
 
 
 def test_private_cart_requires_login(client):
@@ -119,3 +150,130 @@ def test_user_cannot_read_another_users_order(app):
     response = second_client.get(f"/api/orders/{order.json['data']['id']}")
 
     assert response.status_code == 404
+
+
+def test_featured_drop_returns_active_drop_and_its_active_products(app, client):
+    now = datetime.now(timezone.utc)
+    active_id = create_drop(
+        app,
+        'Current drop',
+        'active',
+        now - timedelta(hours=1),
+        now + timedelta(hours=2),
+    )
+    create_drop(
+        app,
+        'Scheduled drop',
+        'scheduled',
+        now + timedelta(days=1),
+        now + timedelta(days=2),
+    )
+    with app.app_context():
+        drop = db.session.get(Drop, active_id)
+        db.session.add(Product(
+            category_id=drop.products[0].category_id,
+            drop_id=active_id,
+            name='Inactive catalog product',
+            description='Should not be featured',
+            price=Decimal('99.00'),
+            stock=2,
+            image_url='https://example.test/inactive.jpg',
+            is_active=False,
+        ))
+        db.session.add(Product(
+            category_id=drop.products[0].category_id,
+            drop_id=None,
+            name='Unassigned catalog product',
+            description='Should not be featured',
+            price=Decimal('75.00'),
+            stock=6,
+            image_url='https://example.test/unassigned.jpg',
+            is_active=True,
+        ))
+        db.session.commit()
+
+    response = client.get('/api/drops/featured')
+
+    assert response.status_code == 200
+    featured = response.json['data']
+    assert featured['status'] == 'active'
+    assert featured['drop']['id'] == active_id
+    assert featured['drop']['starts_at'].endswith('+00:00')
+    assert len(featured['products']) == 1
+    assert featured['products'][0]['name'] == 'Current drop product'
+    assert featured['products'][0]['drop_id'] == active_id
+    assert featured['products'][0]['price'] == '180.00'
+    assert featured['products'][0]['stock'] == 4
+    assert featured['products'][0]['image_url'] == 'https://example.test/drop.jpg'
+
+
+def test_featured_drop_falls_back_to_most_recent_ended_drop(app, client):
+    now = datetime.now(timezone.utc)
+    create_drop(
+        app,
+        'Older ended drop',
+        'ended',
+        now - timedelta(days=5),
+        now - timedelta(days=4),
+    )
+    create_drop(
+        app,
+        'Latest ended drop',
+        'ended',
+        now - timedelta(days=2),
+        now - timedelta(days=1),
+    )
+    most_recent_expired_id = create_drop(
+        app,
+        'Expired active drop',
+        'active',
+        now - timedelta(hours=2),
+        now - timedelta(hours=1),
+    )
+    create_drop(
+        app,
+        'Future drop',
+        'scheduled',
+        now + timedelta(days=1),
+        now + timedelta(days=2),
+    )
+
+    response = client.get('/api/drops/featured')
+
+    assert response.status_code == 200
+    assert response.json['data']['status'] == 'ended'
+    assert response.json['data']['drop']['id'] == most_recent_expired_id
+
+
+def test_featured_drop_returns_empty_when_there_is_no_active_or_ended_drop(app, client):
+    now = datetime.now(timezone.utc)
+    create_drop(
+        app,
+        'Future drop',
+        'scheduled',
+        now + timedelta(days=1),
+        now + timedelta(days=2),
+        with_product=False,
+    )
+
+    response = client.get('/api/drops/featured')
+
+    assert response.status_code == 200
+    assert response.json['data'] is None
+
+
+def test_featured_drop_does_not_treat_a_future_active_drop_as_current(app, client):
+    now = datetime.now(timezone.utc)
+    create_drop(
+        app,
+        'Future active drop',
+        'active',
+        now + timedelta(hours=1),
+        now + timedelta(hours=2),
+        with_product=False,
+    )
+
+    response = client.get('/api/drops/featured')
+
+    assert response.status_code == 200
+    assert response.json['data'] is None

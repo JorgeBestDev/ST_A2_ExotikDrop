@@ -109,6 +109,7 @@ Los modelos principales son:
 - password_hash
 - full_name
 - is_admin
+- is_active
 - created_at
 - relaciones: orders, carts, password_reset_tokens
 
@@ -151,6 +152,7 @@ Los modelos principales son:
 - id
 - cart_id
 - product_id
+- drop_id (instantánea del drop asociada a la compra)
 - quantity
 - added_at
 - relación con cart y product
@@ -175,6 +177,7 @@ Los modelos principales son:
 - id
 - order_id
 - product_id
+- drop_id (instantánea del drop asociada a la compra)
 - quantity
 - unit_price
 - total_price
@@ -229,15 +232,16 @@ relaciones del esquema:
 
 | Tabla | Responsabilidad | Relaciones principales |
 | --- | --- | --- |
-| `users` | Registra clientes y administradores. | Un usuario puede tener muchos `carts`, `orders` y `password_reset_tokens`. |
+| `users` | Registra clientes y administradores activos o desactivados. | Un usuario puede tener muchos `carts`, `orders` y `password_reset_tokens`. |
 | `categories` | Clasifica los productos del catálogo. | Una categoría contiene muchos `products`. |
 | `drops` | Agrupa lanzamientos con fechas y estado. | Un drop puede publicar muchos `products`. |
 | `products` | Contiene el inventario que se muestra en la tienda. | Pertenece a una categoría y opcionalmente a un drop; se relaciona con carritos y pedidos. |
 | `carts` | Representa el carrito de un usuario. | Pertenece a un usuario y contiene muchos `cart_items`. |
 | `cart_items` | Guarda los productos y cantidades elegidos en un carrito. | Une `carts` con `products`; la combinación `cart_id` + `product_id` es única. |
 | `orders` | Guarda la compra confirmada y su estado. | Pertenece a un usuario y contiene muchos `order_items`; puede tener un pago. |
-| `order_items` | Conserva el detalle de una compra. | Une `orders` con `products` y guarda el precio aplicado al momento de comprar. |
+| `order_items` | Conserva el detalle de una compra. | Une `orders` con `products`, conserva precio y drop al momento de comprar. |
 | `payments` | Registra el método, importe y estado del pago. | Se relaciona con una orden. |
+| `admin_captcha_challenges` | Guarda CAPTCHA de un solo uso y fallos temporales de autenticación administrativa. | Conserva huellas IP firmadas para límites temporales; no almacena direcciones IP en claro. |
 | `password_reset_tokens` | Permite gestionar recuperación de contraseñas. | Cada token pertenece a un usuario. |
 
 ### Claves y relaciones
@@ -298,6 +302,52 @@ documentación funciona tanto en GitHub como en una copia local del proyecto.
 
 La API se expone bajo prefijo /api.
 
+### Panel administrativo
+
+- El panel web tiene rutas separadas en `/admin/login` y `/admin/dashboard`.
+- El inicio de sesión administrativo requiere una cuenta con `is_admin`, CAPTCHA
+  local validado en el backend y una sesión exclusiva del panel. Iniciar sesión
+  desde `/login` no concede acceso administrativo.
+- El CAPTCHA local es un desafío matemático de un solo uso, almacenado con
+  expiración en la base de datos. Proporciona una barrera básica y no sustituye
+  un servicio anti-bots especializado para despliegues expuestos a ataques.
+  Se limita a 20 desafíos por minuto y a cinco intentos fallidos de inicio de
+  sesión desde una misma IP dentro de 15 minutos.
+- Crea o promueve la primera cuenta administradora desde una consola local:
+
+  ```bash
+  flask --app app.py admin-create
+  ```
+
+  El comando solicita email, nombre y contraseña (mínimo 8 caracteres); no hay
+  una ruta pública para asignar el rol. Usa contraseñas únicas y configura una
+  `SECRET_KEY` aleatoria de al menos 32 caracteres antes de desplegar. La
+  aplicación rechaza claves de ejemplo en producción y fuerza cookies `Secure`.
+  Activa esa configuración con `FLASK_ENV=production` o `FLASK_CONFIG=production`.
+- Ejecuta las migraciones antes de iniciar la aplicación para añadir el estado
+  de usuario y los desafíos CAPTCHA:
+
+  ```bash
+  flask --app app.py db upgrade
+  ```
+
+- Las ventas del dashboard suman los pedidos creados en el mes, incluso si su
+  pago permanece `pending`, ya que el checkout actual todavía no procesa pagos
+  aprobados. El producto líder cuenta unidades históricas. Para el drop iniciado
+  más recientemente se muestran los pedidos asociados a sus productos, stock
+  restante y tiempo hasta `ends_at`.
+- La baja de usuarios y productos es una desactivación que conserva el historial.
+  Los drops con productos asociados no se eliminan hasta desvincularlos.
+- En el formulario de productos, selecciona una imagen JPG, PNG, WebP o AVIF
+  (máximo 10 MB) para cargarla a Cloudinary. Configura
+  `VITE_CLOUDINARY_CLOUD_NAME` y `VITE_CLOUDINARY_UPLOAD_PRESET` en el
+  `.env` raíz del proyecto (usa `.env.example` como plantilla). Vite carga ese
+  mismo archivo raíz. En la consola de Cloudinary crea un preset de subida
+  **Unsigned** y limita allí los formatos y tamaño permitidos. El navegador usa
+  ese preset público; no coloques el API secret de Cloudinary en variables
+  `VITE_` ni en el frontend. El producto conserva la `secure_url` recibida de
+  Cloudinary como `image_url`.
+
 ### Usuarios
 
 - GET /api/users
@@ -337,6 +387,9 @@ pedidos, carritos y direcciones al usuario autenticado.
 
 - GET /api/drops
 - GET /api/drops/<drop_id>
+- GET /api/drops/featured: devuelve el drop activo dentro de su ventana de fechas
+  con sus productos activos; si no hay uno vigente, devuelve el drop finalizado
+  más reciente o `null` cuando todavía no existe historial.
 
 ### Carts
 
@@ -376,6 +429,26 @@ pedidos, carritos y direcciones al usuario autenticado.
 
 - GET /api/password-reset-tokens
 - GET /api/password-reset-tokens/<token_id>
+
+### Administración (requiere login administrativo con CAPTCHA)
+
+- GET /api/admin/auth/captcha
+- POST /api/admin/auth/login
+- GET /api/admin/auth/me
+- POST /api/admin/auth/logout
+- GET /api/admin/dashboard
+- GET /api/admin/users
+- POST /api/admin/users
+- PUT /api/admin/users/<user_id>
+- DELETE /api/admin/users/<user_id> (desactiva la cuenta)
+- GET /api/admin/products
+- POST /api/admin/products
+- PUT /api/admin/products/<product_id>
+- DELETE /api/admin/products/<product_id> (desactiva el producto)
+- GET /api/admin/drops
+- POST /api/admin/drops
+- PUT /api/admin/drops/<drop_id>
+- DELETE /api/admin/drops/<drop_id>
 
 ## 7. Patrones de respuesta
 

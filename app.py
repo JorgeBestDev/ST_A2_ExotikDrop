@@ -5,12 +5,12 @@ from app import create_app
 
 load_dotenv()
 
-app = create_app()
+app = create_app(os.getenv('FLASK_CONFIG', os.getenv('FLASK_ENV', 'default')).lower())
 
 
 if __name__ == '__main__':
     app.run(
         host='0.0.0.0',
         port=int(os.getenv('PORT', 5000)),
-        debug=os.getenv('DEBUG', 'True').lower() in ('1', 'true', 'yes')
+        debug=app.config.get('DEBUG', False)
     )

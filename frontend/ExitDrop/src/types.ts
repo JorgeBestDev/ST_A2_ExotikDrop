@@ -3,6 +3,7 @@ export type User = { id: number; email: string; full_name: string; is_admin: boo
 export type Product = {
   id: number
   category_id: number
+  drop_id: number | null
   category?: string | null
   name: string
   description: string | null
@@ -10,6 +11,22 @@ export type Product = {
   stock: number
   image_url: string | null
   is_active: boolean
+}
+
+export type Drop = {
+  id: number
+  name: string
+  description: string | null
+  starts_at: string
+  ends_at: string
+  status: string
+  created_at: string | null
+}
+
+export type FeaturedDropData = {
+  status: 'active' | 'ended'
+  drop: Drop
+  products: Product[]
 }
 
 export type Category = { id: number; name: string; image_url: string | null; description?: string | null }

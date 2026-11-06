@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from datetime import timedelta
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,7 @@ def _normalize_database_url(url: str | None) -> str:
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
     ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "dev-admin-key")
     SQLALCHEMY_DATABASE_URI = _normalize_database_url(os.getenv("DATABASE_URL"))
     SQLALCHEMY_TRACK_MODIFICATIONS = False

@@ -130,6 +130,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCart(response.items)
   }, [mergeGuestCart])
 
+  const adminSignIn = useCallback(async (email: string, password: string, challengeId: string, captchaAnswer: string) => {
+    const signedInUser = await apiRequest<User>('/admin/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email,
+        password,
+        challenge_id: challengeId,
+        captcha_answer: captchaAnswer,
+      }),
+    })
+    setUser(signedInUser)
+    await mergeGuestCart()
+    const response = await apiRequest<{ items: CartItem[] }>('/cart')
+    setCart(response.items)
+  }, [mergeGuestCart])
+
   const register = useCallback(async (name: string, email: string, password: string) => {
     const registeredUser = await apiRequest<User>('/auth/register', {
       method: 'POST',
@@ -159,10 +175,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setQuantity,
     removeItem,
     signIn,
+    adminSignIn,
     register,
     signOut,
     refreshCart,
-  }), [user, authReady, cart, error, addToCart, setQuantity, removeItem, signIn, register, signOut, refreshCart])
+  }), [user, authReady, cart, error, addToCart, setQuantity, removeItem, signIn, adminSignIn, register, signOut, refreshCart])
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
