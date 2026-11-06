@@ -13,6 +13,7 @@ export type StoreContextValue = {
   setQuantity: (item: CartItem, quantity: number) => Promise<void>
   removeItem: (item: CartItem) => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
+  adminSignIn: (email: string, password: string, challengeId: string, captchaAnswer: string) => Promise<void>
   register: (name: string, email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   refreshCart: () => Promise<void>

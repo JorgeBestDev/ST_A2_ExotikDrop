@@ -16,6 +16,7 @@ def register_routes(app):
         carts_routes,
         cart_item,
         storefront_routes,
+        admin_routes,
     )
 
     app.register_blueprint(user_routes.bp)
@@ -29,5 +30,6 @@ def register_routes(app):
     app.register_blueprint(carts_routes.bp)
     app.register_blueprint(cart_item.bp)
     app.register_blueprint(storefront_routes.bp)
+    app.register_blueprint(admin_routes.bp)
 
     return app

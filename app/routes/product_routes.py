@@ -11,6 +11,7 @@ def serialize_product(product):
     return {
         'id': product.id,
         'category_id': product.category_id,
+        'drop_id': product.drop_id,
         'category': product.category.name if product.category else None,
         'name': product.name,
         'description': product.description,

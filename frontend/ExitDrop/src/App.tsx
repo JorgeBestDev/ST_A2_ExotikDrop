@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import './App.css'
 import './flows.css'
 import './cart-checkout.css'
+import './featured-drop.css'
 import AccountPage from './AccountPage'
 import AuthPage from './AuthPage'
 import { CheckoutPage, OrderConfirmationPage } from './CheckoutPage'
@@ -11,6 +12,7 @@ import ProductPage from './ProductPage'
 import { StoreProvider } from './StoreContext'
 import { useStore } from './store-context'
 import StoreLayout from './StoreLayout'
+import { AdminDashboard, AdminDrops, AdminLogin, AdminProducts, AdminUsers, AdminGate, AdminLayout } from './admin/AdminPanel'
 
 function AccountGate({ children }: { children: ReactNode }) {
   const { user, authReady } = useStore()
@@ -26,6 +28,14 @@ function NotFound() {
 
 function AppRoutes() {
   return <Routes>
+    <Route path="/admin/login" element={<AdminLogin />} />
+    <Route path="/admin" element={<AdminGate><AdminLayout /></AdminGate>}>
+      <Route index element={<Navigate to="dashboard" replace />} />
+      <Route path="dashboard" element={<AdminDashboard />} />
+      <Route path="users" element={<AdminUsers />} />
+      <Route path="products" element={<AdminProducts />} />
+      <Route path="drops" element={<AdminDrops />} />
+    </Route>
     <Route element={<StoreLayout />}>
       <Route index element={<HomePage />} />
       <Route path="products/:productId" element={<ProductPage />} />

@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 from flask_login import current_user, login_required
 from werkzeug.security import generate_password_hash
 
@@ -14,15 +14,20 @@ def serialize_user(user):
         'email': user.email,
         'full_name': user.full_name,
         'is_admin': user.is_admin,
+        'is_active': user.is_active,
         'created_at': user.created_at.isoformat() if user.created_at else None
     }
+
+
+def has_admin_access():
+    return current_user.is_admin and session.get('admin_authenticated')
 
 
 @bp.route('', methods=['GET'])
 @bp.route('/', methods=['GET'])
 @login_required
 def get_users():
-    if not current_user.is_admin:
+    if not has_admin_access():
         return jsonify(success=False, message='No tienes permiso para consultar usuarios'), 403
     users = User.query.order_by(User.id.asc()).all()
     return jsonify({
@@ -35,7 +40,7 @@ def get_users():
 @bp.route('/<int:user_id>', methods=['GET'])
 @login_required
 def get_user(user_id):
-    if current_user.id != user_id and not current_user.is_admin:
+    if current_user.id != user_id and not has_admin_access():
         return jsonify(success=False, message='No tienes permiso para consultar este usuario'), 403
     user = User.query.get(user_id)
 
@@ -91,7 +96,7 @@ def create_user():
 @bp.route('/<int:user_id>', methods=['PUT'])
 @login_required
 def update_user(user_id):
-    if current_user.id != user_id and not current_user.is_admin:
+    if current_user.id != user_id and not has_admin_access():
         return jsonify(success=False, message='No tienes permiso para actualizar este usuario'), 403
     data = request.get_json(silent=True) or {}
     user = User.query.get(user_id)
@@ -102,9 +107,9 @@ def update_user(user_id):
             'message': 'Usuario no encontrado'
         }), 404
 
-    if 'is_admin' in data and not current_user.is_admin:
+    if 'is_admin' in data and not has_admin_access():
         return jsonify(success=False, message='No tienes permiso para cambiar privilegios'), 403
-    if 'password' in data and data.get('password') and not current_user.is_admin:
+    if 'password' in data and data.get('password') and not has_admin_access():
         return jsonify(success=False, message='Usa la ruta de cambio de contraseña de la cuenta'), 400
 
     if 'email' in data and data.get('email'):
@@ -119,8 +124,19 @@ def update_user(user_id):
     if 'full_name' in data and data.get('full_name'):
         user.full_name = data['full_name'].strip()
 
-    if 'is_admin' in data and current_user.is_admin:
-        user.is_admin = bool(data.get('is_admin'))
+    if 'is_admin' in data and has_admin_access():
+        next_is_admin = data.get('is_admin')
+        if not isinstance(next_is_admin, bool):
+            return jsonify(success=False, message='is_admin debe ser booleano'), 400
+        if user.is_admin and user.is_active and not next_is_admin:
+            other_active_admin = User.query.filter(
+                User.is_admin.is_(True),
+                User.is_active.is_(True),
+                User.id != user.id,
+            ).first()
+            if user.id == current_user.id or other_active_admin is None:
+                return jsonify(success=False, message='No puedes degradar al último administrador'), 409
+        user.is_admin = next_is_admin
 
     if 'password' in data and data.get('password'):
         user.password_hash = generate_password_hash(data['password'])
@@ -137,7 +153,7 @@ def update_user(user_id):
 @bp.route('/<int:user_id>', methods=['DELETE'])
 @login_required
 def delete_user(user_id):
-    if not current_user.is_admin:
+    if not has_admin_access():
         return jsonify(success=False, message='No tienes permiso para eliminar usuarios'), 403
     user = User.query.get(user_id)
 
@@ -147,10 +163,18 @@ def delete_user(user_id):
             'message': 'Usuario no encontrado'
         }), 404
 
-    db.session.delete(user)
+    if user.is_admin and user.is_active:
+        other_active_admin = User.query.filter(
+            User.is_admin.is_(True),
+            User.is_active.is_(True),
+            User.id != user.id,
+        ).first()
+        if user.id == current_user.id or other_active_admin is None:
+            return jsonify(success=False, message='No puedes desactivar al último administrador'), 409
+    user.is_active = False
     db.session.commit()
 
     return jsonify({
         'success': True,
-        'message': 'Usuario eliminado correctamente'
+        'message': 'Usuario desactivado correctamente'
     }), 200

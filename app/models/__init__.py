@@ -9,6 +9,7 @@ from app.models.order_items import OrderItem
 from app.models.payments import Payment
 from app.models.password_reset_tokens import PasswordResetToken
 from app.models.shipping_addresses import ShippingAddress
+from app.models.admin_captcha_challenges import AdminCaptchaChallenge
 
 __all__ = [
     'User',
@@ -22,4 +23,5 @@ __all__ = [
     'Payment',
     'PasswordResetToken',
     'ShippingAddress',
+    'AdminCaptchaChallenge',
 ]

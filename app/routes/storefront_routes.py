@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -111,6 +111,7 @@ def register():
     except IntegrityError:
         db.session.rollback()
         return jsonify(success=False, message='El email ya está registrado'), 409
+    session.pop('admin_authenticated', None)
     login_user(user)
     return jsonify(success=True, data=serialize_user(user)), 201
 
@@ -122,9 +123,10 @@ def login():
     password = data.get('password')
     if not isinstance(email, str) or not isinstance(password, str):
         return jsonify(success=False, message='Email y contraseña son obligatorios'), 400
-    user = User.query.filter_by(email=email.strip().lower()).first()
+    user = User.query.filter_by(email=email.strip().lower(), is_active=True).first()
     if user is None or not check_password_hash(user.password_hash, password):
         return jsonify(success=False, message='Email o contraseña incorrectos'), 401
+    session.pop('admin_authenticated', None)
     login_user(user)
     return jsonify(success=True, data=serialize_user(user)), 200
 
@@ -132,6 +134,7 @@ def login():
 @bp.post('/auth/logout')
 @login_required
 def logout():
+    session.pop('admin_authenticated', None)
     logout_user()
     return jsonify(success=True), 200
 
@@ -388,6 +391,7 @@ def checkout():
         total += line_total
         order.items.append(OrderItem(
             product_id=product.id,
+            drop_id=product.drop_id,
             quantity=cart_item.quantity,
             unit_price=product.price,
             total_price=line_total,
