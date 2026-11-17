@@ -594,3 +594,4 @@ El proyecto cuenta con:
 ExokitDrop es una base sólida para una aplicación de ecommerce con enfoque en drops y productos de edición limitada. La arquitectura actual ya permite trabajar con una API REST bien organizada y preparada para conectarse a un frontend con React, manteniendo un modelo de datos claro, limpio y extensible.
 
 El proyecto está preparado para continuar evolucionando hacia una solución completa de compra online, con foco tanto en la experiencia de usuario como en la administración y gestión interna del negocio.
+- OswaldIk
