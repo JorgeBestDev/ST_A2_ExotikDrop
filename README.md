@@ -4,7 +4,7 @@ Aplicación web orientada a la gestión y compra de productos de edición limita
 
 ## 1. Descripción general
 
-ExokitDrop es una propuesta de plataforma de e-commerce especializada en productos premium, rare editions y drops. La aplicación busca cubrir la parte comercial y operativa del negocio, permitiendo:
+ExokitDrop es una propuesta de plataforma de e-commerce que se especializa en productos premium, rare editions y drops. La aplicación busca cubrir la parte comercial y operativa del negocio, permitiendo:
 
 - gestionar usuarios y administradores
 - mostrar categorías y productos
