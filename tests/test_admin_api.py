@@ -332,3 +332,4 @@ def test_production_forces_secure_session_cookies(monkeypatch):
 
     assert production_app.config['DEBUG'] is False
     assert production_app.config['SESSION_COOKIE_SECURE'] is True
+    assert production_app.config['SESSION_COOKIE_SAMESITE'] == 'None'
