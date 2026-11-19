@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request, session
 from flask_login import current_user, login_required, login_user, logout_user
@@ -15,6 +16,9 @@ from app.models.payments import Payment
 from app.models.products import Product
 from app.models.shipping_addresses import ShippingAddress
 from app.models.users import User
+from app.models.inventory_reservations import InventoryReservation, InventoryReservationItem
+from app.services.inventory import as_utc, available_stock, expire_reservations, reserved_quantities
+from app.services.transactions import rollback_on_error
 
 bp = Blueprint('storefront', __name__, url_prefix='/api')
 ADDRESS_FIELDS = (
@@ -59,6 +63,7 @@ def get_or_create_cart(user):
 def serialize_cart(cart):
     items = []
     subtotal = Decimal('0.00')
+    reserved = reserved_quantities(item.product_id for item in cart.items)
     for item in cart.items:
         product = item.product
         line_total = product.price * item.quantity
@@ -70,7 +75,7 @@ def serialize_cart(cart):
             'price': f'{product.price:.2f}',
             'image_url': product.image_url,
             'quantity': item.quantity,
-            'stock': product.stock,
+            'stock': available_stock(product, reserved=reserved.get(product.id, 0)),
             'line_total': f'{line_total:.2f}',
         })
     return {'id': cart.id, 'items': items, 'subtotal': f'{subtotal:.2f}', 'count': sum(item['quantity'] for item in items)}
@@ -91,6 +96,7 @@ def address_payload(data, partial=False):
 
 
 @bp.post('/auth/register')
+@rollback_on_error
 def register():
     data = request.get_json(silent=True) or {}
     full_name = data.get('full_name')
@@ -117,6 +123,7 @@ def register():
 
 
 @bp.post('/auth/login')
+@rollback_on_error
 def login():
     data = request.get_json(silent=True) or {}
     email = data.get('email')
@@ -133,6 +140,7 @@ def login():
 
 @bp.post('/auth/logout')
 @login_required
+@rollback_on_error
 def logout():
     session.pop('admin_authenticated', None)
     logout_user()
@@ -147,6 +155,7 @@ def get_current_user():
 
 @bp.put('/account/profile')
 @login_required
+@rollback_on_error
 def update_profile():
     data = request.get_json(silent=True) or {}
     full_name = data.get('full_name')
@@ -169,6 +178,7 @@ def update_profile():
 
 @bp.put('/account/password')
 @login_required
+@rollback_on_error
 def update_password():
     data = request.get_json(silent=True) or {}
     current_password = data.get('current_password')
@@ -186,6 +196,7 @@ def update_password():
 
 @bp.route('/account/addresses', methods=['GET', 'POST'])
 @login_required
+@rollback_on_error
 def account_addresses():
     if request.method == 'GET':
         addresses = ShippingAddress.query.filter_by(user_id=current_user.id).order_by(ShippingAddress.is_default.desc(), ShippingAddress.id.asc()).all()
@@ -206,6 +217,7 @@ def account_addresses():
 
 @bp.route('/account/addresses/<int:address_id>', methods=['PUT', 'DELETE'])
 @login_required
+@rollback_on_error
 def edit_account_address(address_id):
     address = ShippingAddress.query.filter_by(id=address_id, user_id=current_user.id).first()
     if address is None:
@@ -250,6 +262,7 @@ def account_payment_methods():
 
 @bp.route('/cart', methods=['GET'])
 @login_required
+@rollback_on_error
 def get_cart():
     cart = get_or_create_cart(current_user)
     db.session.commit()
@@ -258,6 +271,7 @@ def get_cart():
 
 @bp.post('/cart/items')
 @login_required
+@rollback_on_error
 def add_cart_item():
     data = request.get_json(silent=True) or {}
     product_id = data.get('product_id')
@@ -270,7 +284,7 @@ def add_cart_item():
     cart = get_or_create_cart(current_user)
     item = CartItem.query.filter_by(cart_id=cart.id, product_id=product.id).first()
     resulting_quantity = quantity + (item.quantity if item else 0)
-    if resulting_quantity > product.stock:
+    if resulting_quantity > available_stock(product):
         return jsonify(success=False, message='La cantidad solicitada supera el inventario disponible'), 409
     if item:
         item.quantity = resulting_quantity
@@ -282,6 +296,7 @@ def add_cart_item():
 
 @bp.put('/cart/items/<int:item_id>')
 @login_required
+@rollback_on_error
 def update_cart_item(item_id):
     data = request.get_json(silent=True) or {}
     quantity = data.get('quantity')
@@ -291,7 +306,7 @@ def update_cart_item(item_id):
     item = CartItem.query.filter_by(id=item_id, cart_id=cart.id if cart else -1).first()
     if item is None:
         return jsonify(success=False, message='Producto no encontrado en el carrito'), 404
-    if quantity > item.product.stock:
+    if quantity > available_stock(item.product):
         return jsonify(success=False, message='La cantidad solicitada supera el inventario disponible'), 409
     item.quantity = quantity
     db.session.commit()
@@ -300,6 +315,7 @@ def update_cart_item(item_id):
 
 @bp.delete('/cart/items/<int:item_id>')
 @login_required
+@rollback_on_error
 def delete_cart_item(item_id):
     cart = Cart.query.filter_by(user_id=current_user.id).first()
     item = CartItem.query.filter_by(id=item_id, cart_id=cart.id if cart else -1).first()
@@ -312,6 +328,7 @@ def delete_cart_item(item_id):
 
 @bp.post('/cart/merge')
 @login_required
+@rollback_on_error
 def merge_guest_cart():
     data = request.get_json(silent=True) or {}
     guest_items = data.get('items')
@@ -335,7 +352,7 @@ def merge_guest_cart():
             return jsonify(success=False, message=f'Producto {product_id} ya no está disponible'), 409
         current_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product.id).first()
         total_quantity = quantity + (current_item.quantity if current_item else 0)
-        if total_quantity > product.stock:
+        if total_quantity > available_stock(product):
             return jsonify(success=False, message=f'Inventario insuficiente para {product.name}'), 409
         prepared.append((product, current_item, total_quantity, quantity))
 
@@ -350,25 +367,68 @@ def merge_guest_cart():
 
 @bp.post('/orders')
 @login_required
+@rollback_on_error
 def checkout():
     data = request.get_json(silent=True) or {}
     address_id = data.get('address_id')
+    checkout_key = request.headers.get('Idempotency-Key') or data.get('checkout_key')
     if not isinstance(address_id, int) or isinstance(address_id, bool):
         return jsonify(success=False, message='Selecciona una dirección de envío'), 400
     if data.get('payment_method') != 'simulated_card':
         return jsonify(success=False, message='Método de pago provisional no válido'), 400
+    if not isinstance(checkout_key, str) or not checkout_key.strip() or len(checkout_key.strip()) > 64:
+        return jsonify(success=False, message='Se requiere una clave de idempotencia válida'), 400
 
-    address = ShippingAddress.query.filter_by(id=address_id, user_id=current_user.id).first()
+    checkout_key = checkout_key.strip()
+    user = User.query.filter_by(id=current_user.id).with_for_update().first()
+    now = datetime.now(timezone.utc)
+    expire_reservations(user.id, now)
+    existing_order = Order.query.filter_by(user_id=user.id, checkout_key=checkout_key).first()
+    if existing_order is not None:
+        return jsonify(success=True, data=serialize_order(existing_order)), 200
+
+    active_reservation = InventoryReservation.query.filter_by(
+        user_id=user.id,
+        status='active',
+    ).with_for_update().first()
+    if active_reservation is not None:
+        active_reservation.status = 'released'
+        if active_reservation.order.status == 'pending':
+            active_reservation.order.status = 'cancelled'
+        if active_reservation.order.payment and active_reservation.order.payment.status == 'pending':
+            active_reservation.order.payment.status = 'cancelled'
+
+    address = ShippingAddress.query.filter_by(id=address_id, user_id=user.id).first()
     if address is None:
         return jsonify(success=False, message='Dirección de envío no encontrada'), 404
-    cart = Cart.query.filter_by(user_id=current_user.id).first()
+    cart = Cart.query.filter_by(user_id=user.id).with_for_update().first()
     if cart is None or not cart.items:
         return jsonify(success=False, message='El carrito está vacío'), 400
 
+    cart_items = sorted(cart.items, key=lambda item: item.product_id)
+    product_ids = [item.product_id for item in cart_items]
+    products = db.session.execute(
+        select(Product)
+        .where(Product.id.in_(product_ids), Product.is_active.is_(True))
+        .order_by(Product.id.asc())
+        .with_for_update()
+    ).scalars().all()
+    products_by_id = {product.id: product for product in products}
+    if len(products_by_id) != len(set(product_ids)):
+        return jsonify(success=False, message='Un producto del carrito ya no está disponible'), 409
+
+    reserved = reserved_quantities(product_ids, now)
+    for cart_item in cart_items:
+        product = products_by_id[cart_item.product_id]
+        available = product.stock - reserved.get(product.id, 0)
+        if cart_item.quantity > available:
+            return jsonify(success=False, message=f'Inventario insuficiente para {product.name}'), 409
+
     order = Order(
-        user_id=current_user.id,
+        user_id=user.id,
         total=Decimal('0.00'),
         status='pending',
+        checkout_key=checkout_key,
         shipping_recipient=address.recipient,
         shipping_phone=address.phone,
         shipping_line1=address.line1,
@@ -379,14 +439,9 @@ def checkout():
         shipping_country=address.country,
     )
     total = Decimal('0.00')
-    for cart_item in cart.items:
-        product = Product.query.filter_by(id=cart_item.product_id, is_active=True).with_for_update().first()
-        if product is None:
-            db.session.rollback()
-            return jsonify(success=False, message='Un producto del carrito ya no está disponible'), 409
-        if cart_item.quantity > product.stock:
-            db.session.rollback()
-            return jsonify(success=False, message=f'Inventario insuficiente para {product.name}'), 409
+    reserved_items = []
+    for cart_item in cart_items:
+        product = products_by_id[cart_item.product_id]
         line_total = product.price * cart_item.quantity
         total += line_total
         order.items.append(OrderItem(
@@ -396,19 +451,31 @@ def checkout():
             unit_price=product.price,
             total_price=line_total,
         ))
-        product.stock -= cart_item.quantity
+        if product.drop_id is not None:
+            reserved_items.append((product.id, cart_item.quantity))
     order.total = total
     db.session.add(order)
     db.session.flush()
-    db.session.add(Payment(
+    order.payment = Payment(
         order_id=order.id,
         method='simulated_card',
         amount=total,
         status='pending',
-    ))
-    for cart_item in list(cart.items):
+    )
+    if reserved_items:
+        order.inventory_reservation = InventoryReservation(
+            user_id=user.id,
+            order_id=order.id,
+            expires_at=now + timedelta(minutes=10),
+            status='active',
+        )
+        order.inventory_reservation.items = [
+            InventoryReservationItem(product_id=product_id, quantity=quantity)
+            for product_id, quantity in reserved_items
+        ]
+    for cart_item in cart_items:
         db.session.delete(cart_item)
-    db.session.commit()
+    db.session.flush()
     return jsonify(success=True, data=serialize_order(order)), 201
 
 
@@ -440,4 +507,114 @@ def serialize_order(order):
             'method': order.payment.method,
             'status': order.payment.status,
         } if order.payment else None,
+        'reservation': {
+            'status': order.inventory_reservation.status,
+            'expires_at': as_utc(order.inventory_reservation.expires_at).isoformat(),
+        } if order.inventory_reservation else None,
     }
+
+
+@bp.get('/checkout/reservation')
+@login_required
+@rollback_on_error
+def get_current_reservation():
+    now = datetime.now(timezone.utc)
+    User.query.filter_by(id=current_user.id).with_for_update().first()
+    expire_reservations(current_user.id, now)
+    reservation = InventoryReservation.query.filter_by(
+        user_id=current_user.id,
+        status='active',
+    ).filter(InventoryReservation.expires_at > now).first()
+    return jsonify(success=True, data={
+        'reservation': {
+            'order_id': reservation.order_id,
+            'expires_at': reservation.expires_at.isoformat(),
+        } if reservation else None,
+        'server_time': now.isoformat(),
+    }), 200
+
+
+@bp.post('/orders/<int:order_id>/pay')
+@login_required
+@rollback_on_error
+def confirm_simulated_payment(order_id):
+    now = datetime.now(timezone.utc)
+    User.query.filter_by(id=current_user.id).with_for_update().first()
+    order = Order.query.filter_by(id=order_id, user_id=current_user.id).with_for_update().first()
+    if order is None:
+        return jsonify(success=False, message='Pedido no encontrado'), 404
+    if order.status == 'paid' and order.payment and order.payment.status == 'completed':
+        return jsonify(success=True, data=serialize_order(order)), 200
+    if order.status != 'pending' or order.payment is None or order.payment.status != 'pending':
+        return jsonify(success=False, message='Este pedido ya no puede pagarse'), 409
+
+    reservation = InventoryReservation.query.filter_by(order_id=order.id).with_for_update().first()
+    if reservation is not None and (
+        reservation.status != 'active' or reservation.expires_at <= now
+    ):
+        if reservation.status == 'active':
+            reservation.status = 'expired'
+        order.status = 'expired'
+        order.payment.status = 'expired'
+        db.session.commit()
+        return jsonify(success=False, message='El tiempo para pagar esta reserva terminó'), 410
+
+    order_items = sorted(order.items, key=lambda item: item.product_id)
+    product_ids = [item.product_id for item in order_items]
+    products = db.session.execute(
+        select(Product)
+        .where(Product.id.in_(product_ids))
+        .order_by(Product.id.asc())
+        .with_for_update()
+    ).scalars().all()
+    products_by_id = {product.id: product for product in products}
+    unavailable = next(
+        (
+            products_by_id[item.product_id].name
+            if item.product_id in products_by_id
+            else f'producto #{item.product_id}'
+            for item in order_items
+            if item.product_id not in products_by_id
+            or not products_by_id[item.product_id].is_active
+            or products_by_id[item.product_id].stock < item.quantity
+        ),
+        None,
+    )
+    if unavailable is not None:
+        if reservation is not None:
+            reservation.status = 'released'
+        order.status = 'cancelled'
+        order.payment.status = 'failed'
+        db.session.commit()
+        return jsonify(success=False, message=f'Inventario insuficiente para {unavailable}; el pedido fue cancelado'), 409
+
+    for item in order_items:
+        products_by_id[item.product_id].stock -= item.quantity
+    if reservation is not None:
+        reservation.status = 'consumed'
+    order.status = 'paid'
+    order.payment.status = 'completed'
+    db.session.commit()
+    return jsonify(success=True, data=serialize_order(order)), 200
+
+
+@bp.post('/orders/<int:order_id>/cancel')
+@login_required
+@rollback_on_error
+def cancel_order_reservation(order_id):
+    User.query.filter_by(id=current_user.id).with_for_update().first()
+    order = Order.query.filter_by(id=order_id, user_id=current_user.id).with_for_update().first()
+    if order is None:
+        return jsonify(success=False, message='Pedido no encontrado'), 404
+    if order.status == 'paid':
+        return jsonify(success=False, message='Un pedido pagado no se puede cancelar desde el checkout'), 409
+    if order.status == 'cancelled':
+        return jsonify(success=True, data=serialize_order(order)), 200
+    if order.status == 'pending':
+        order.status = 'cancelled'
+        if order.payment and order.payment.status == 'pending':
+            order.payment.status = 'cancelled'
+        if order.inventory_reservation and order.inventory_reservation.status == 'active':
+            order.inventory_reservation.status = 'released'
+    db.session.commit()
+    return jsonify(success=True, data=serialize_order(order)), 200

@@ -4,6 +4,7 @@ from werkzeug.security import generate_password_hash
 
 from app.extensions import db
 from app.models.users import User
+from app.services.transactions import rollback_on_error
 
 bp = Blueprint('users', __name__, url_prefix='/api/users')
 
@@ -58,6 +59,7 @@ def get_user(user_id):
 
 @bp.route('', methods=['POST'])
 @bp.route('/', methods=['POST'])
+@rollback_on_error
 def create_user():
     data = request.get_json(silent=True) or {}
 
@@ -95,6 +97,7 @@ def create_user():
 
 @bp.route('/<int:user_id>', methods=['PUT'])
 @login_required
+@rollback_on_error
 def update_user(user_id):
     if current_user.id != user_id and not has_admin_access():
         return jsonify(success=False, message='No tienes permiso para actualizar este usuario'), 403
@@ -152,6 +155,7 @@ def update_user(user_id):
 
 @bp.route('/<int:user_id>', methods=['DELETE'])
 @login_required
+@rollback_on_error
 def delete_user(user_id):
     if not has_admin_access():
         return jsonify(success=False, message='No tienes permiso para eliminar usuarios'), 403

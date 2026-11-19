@@ -22,5 +22,9 @@ class Product(db.Model):
     cart_items = db.relationship('CartItem', back_populates='product', cascade='all, delete-orphan')
     order_items = db.relationship('OrderItem', back_populates='product', cascade='all, delete-orphan')
 
+    __table_args__ = (
+        db.CheckConstraint('stock >= 0', name='ck_products_stock_nonnegative'),
+    )
+
     def __repr__(self):
         return f'<Product {self.name}>'

@@ -10,6 +10,7 @@ from app.models.payments import Payment
 from app.models.password_reset_tokens import PasswordResetToken
 from app.models.shipping_addresses import ShippingAddress
 from app.models.admin_captcha_challenges import AdminCaptchaChallenge
+from app.models.inventory_reservations import InventoryReservation, InventoryReservationItem
 
 __all__ = [
     'User',
@@ -24,4 +25,6 @@ __all__ = [
     'PasswordResetToken',
     'ShippingAddress',
     'AdminCaptchaChallenge',
+    'InventoryReservation',
+    'InventoryReservationItem',
 ]
