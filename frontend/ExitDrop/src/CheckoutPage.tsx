@@ -138,7 +138,8 @@ export function CheckoutPage() {
   const [addresses, setAddresses] = useState<ShippingAddress[]>([])
   const [selectedAddress, setSelectedAddress] = useState<number | ''>('')
   const [address, setAddress] = useState<AddressInput>(emptyAddress)
-  const [addAddress, setAddAddress] = useState(false)
+  const [addAddress, setAddAddress] = useState(true)
+  const [addressLoadError, setAddressLoadError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -147,9 +148,15 @@ export function CheckoutPage() {
     apiRequest<ShippingAddress[]>('/account/addresses').then((result) => {
       setAddresses(result)
       const preferred = result.find((entry) => entry.is_default) ?? result[0]
-      if (preferred) setSelectedAddress(preferred.id)
+      if (preferred) {
+        setSelectedAddress(preferred.id)
+        setAddAddress(false)
+      }
       else setAddAddress(true)
-    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not load shipping addresses.'))
+    }).catch((reason: unknown) => {
+      setAddAddress(true)
+      setAddressLoadError(reason instanceof Error ? reason.message : 'Could not load shipping addresses.')
+    })
   }, [user])
 
   if (!user) return <main className="flow-page">
@@ -231,12 +238,15 @@ export function CheckoutPage() {
             <span>01</span>
             <div><h2>Delivery details</h2><p>Where should we send your drop?</p></div>
           </div>
+          {addressLoadError && <p className="form-error" role="alert">
+            {addressLoadError} Enter a new shipping address below to continue.
+          </p>}
           {addresses.length > 0 && !addAddress && <SavedAddressOptions
             addresses={addresses}
             selectedAddress={selectedAddress}
             onSelect={setSelectedAddress}
           />}
-          {addAddress && <AddressFields address={address} onChange={setAddressField} />}
+          {(addresses.length === 0 || addAddress) && <AddressFields address={address} onChange={setAddressField} />}
           {addresses.length > 0 && <button className="inline-action" type="button" onClick={() => setAddAddress((value) => !value)}>
             {addAddress ? 'Choose a saved address' : '+ Add another address'}
           </button>}
