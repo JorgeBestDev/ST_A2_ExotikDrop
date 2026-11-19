@@ -347,8 +347,9 @@ La API se expone bajo prefijo /api.
   una ruta pública para asignar el rol. Usa contraseñas únicas y configura una
   `SECRET_KEY` aleatoria de al menos 32 caracteres antes de desplegar. La
   aplicación rechaza claves de ejemplo, exige PostgreSQL en producción y fuerza
-  cookies `Secure` y `SameSite=None` para permitir que el frontend y la API
-  compartan la sesión cuando están en orígenes distintos. Configura
+  cookies `Secure`, `SameSite=None` y `Partitioned` para que navegadores que
+  bloquean cookies de terceros puedan compartir la sesión cuando el frontend y
+  la API están en sitios distintos. Configura
   `CORS_ORIGINS` con el origen exacto del frontend en Render.
   Activa esa configuración con `FLASK_ENV=production` o `FLASK_CONFIG=production`.
 - Ejecuta las migraciones antes de iniciar la aplicación para añadir el estado

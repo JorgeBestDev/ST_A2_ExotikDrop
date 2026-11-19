@@ -232,6 +232,7 @@ def admin_login():
         httponly=True,
         secure=current_app.config['SESSION_COOKIE_SECURE'],
         samesite=current_app.config['SESSION_COOKIE_SAMESITE'],
+        partitioned=current_app.config['SESSION_COOKIE_PARTITIONED'],
         path='/api/admin',
     )
     return response, 200
@@ -259,6 +260,7 @@ def admin_logout():
         secure=current_app.config['SESSION_COOKIE_SECURE'],
         httponly=True,
         samesite=current_app.config['SESSION_COOKIE_SAMESITE'],
+        partitioned=current_app.config['SESSION_COOKIE_PARTITIONED'],
     )
     return response, 200
 

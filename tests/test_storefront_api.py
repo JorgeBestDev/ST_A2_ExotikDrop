@@ -86,6 +86,28 @@ def test_private_cart_requires_login(client):
     assert response.json['success'] is False
 
 
+def test_customer_session_cookie_is_partitioned_for_cross_site_browsers(app, client):
+    app.config.update(
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_SAMESITE='None',
+        SESSION_COOKIE_PARTITIONED=True,
+    )
+    base_url = 'https://api.example.test'
+    response = client.post('/api/auth/register', json={
+        'full_name': 'Test Buyer',
+        'email': 'partitioned-buyer@example.test',
+        'password': 'development-password',
+    }, base_url=base_url)
+
+    cookie = response.headers['Set-Cookie']
+    assert response.status_code == 201
+    assert 'exitdrop_customer_session=' in cookie
+    assert 'SameSite=None' in cookie
+    assert 'Secure' in cookie
+    assert 'Partitioned' in cookie
+    assert client.get('/api/auth/me', base_url=base_url).status_code == 200
+
+
 def test_guest_cart_merge_and_checkout_snapshot(app, client):
     product_id = create_product(app)
     assert register(client).status_code == 201

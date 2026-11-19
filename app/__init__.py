@@ -46,6 +46,7 @@ def create_app(config_name: str = 'default') -> Flask:
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_NAME'] = 'exitdrop_customer_session'
     app.config['SESSION_COOKIE_SAMESITE'] = 'None' if config_name == 'production' else 'Lax'
+    app.config['SESSION_COOKIE_PARTITIONED'] = config_name == 'production'
     app.config['SESSION_COOKIE_SECURE'] = (
         True if config_name == 'production'
         else os.getenv('SESSION_COOKIE_SECURE', 'False').lower() in ('1', 'true', 'yes')
