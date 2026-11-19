@@ -63,4 +63,5 @@ export type Order = {
   shipping_address: Omit<ShippingAddress, 'id' | 'is_default'>
   items: Array<{ product_id: number; name: string; image_url?: string | null; quantity: number; unit_price: string; total_price: string }>
   payment: { method: string; status: string } | null
+  reservation?: { status: string; expires_at: string } | null
 }

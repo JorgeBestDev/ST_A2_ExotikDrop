@@ -4,6 +4,7 @@ import { apiRequest } from './api'
 import { ActionButton, ActionLink } from './components/Actions'
 import CartQuantityControls from './components/CartQuantityControls'
 import FlowCard from './components/FlowCard'
+import ReservationCountdown from './components/ReservationCountdown'
 import { useStore } from './store-context'
 import type { CartItem, Order, ShippingAddress } from './types'
 
@@ -17,6 +18,15 @@ const emptyAddress: AddressInput = {
   region: '',
   postal_code: '',
   country: '',
+}
+const CHECKOUT_KEY = 'exitdrop.checkout-key'
+
+function getCheckoutKey() {
+  const savedKey = sessionStorage.getItem(CHECKOUT_KEY)
+  if (savedKey) return savedKey
+  const key = crypto.randomUUID()
+  sessionStorage.setItem(CHECKOUT_KEY, key)
+  return key
 }
 
 const addressFields: Array<{ key: keyof AddressInput; label: string; required?: boolean; className?: string; optional?: boolean }> = [
@@ -123,7 +133,7 @@ function CheckoutOrderSummary({
 }
 
 export function CheckoutPage() {
-  const { cart, subtotal, user, setQuantity, removeItem, refreshCart } = useStore()
+  const { cart, subtotal, user, setQuantity, removeItem, refreshCart, refreshReservation } = useStore()
   const navigate = useNavigate()
   const [addresses, setAddresses] = useState<ShippingAddress[]>([])
   const [selectedAddress, setSelectedAddress] = useState<number | ''>('')
@@ -194,9 +204,12 @@ export function CheckoutPage() {
       if (!addressId) throw new Error('Select a shipping address.')
       const order = await apiRequest<Order>('/orders', {
         method: 'POST',
+        headers: { 'Idempotency-Key': getCheckoutKey() },
         body: JSON.stringify({ address_id: addressId, payment_method: 'simulated_card' }),
       })
       await refreshCart()
+      await refreshReservation()
+      sessionStorage.removeItem(CHECKOUT_KEY)
       navigate(`/orders/${order.id}/confirmation`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not place your order.')
@@ -255,8 +268,10 @@ export function CheckoutPage() {
 
 export function OrderConfirmationPage() {
   const { orderId } = useParams()
+  const { reservationServerOffset, refreshReservation } = useStore()
   const [order, setOrder] = useState<Order | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!orderId) return
@@ -265,13 +280,48 @@ export function OrderConfirmationPage() {
     })
   }, [orderId])
 
+  async function updateOrder(action: 'pay' | 'cancel') {
+    if (!order) return
+    setBusy(true)
+    setError(null)
+    try {
+      const updated = await apiRequest<Order>(`/orders/${order.id}/${action}`, { method: 'POST' })
+      setOrder(updated)
+      await refreshReservation()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not update this order.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return <main className="flow-page">
     <FlowCard className="confirmation-card">
-      {error ? <p className="form-error" role="alert">{error}</p> : !order ? <p>Loading order…</p> : <>
+      {!order ? error ? <p className="form-error" role="alert">{error}</p> : <p>Loading order…</p> : <>
+        {error && <p className="form-error" role="alert">{error}</p>}
         <div className="confirmation-check">✓</div>
-        <p className="eyebrow">Order received</p>
-        <h1>Thanks for your order.</h1>
-        <p className="flow-lead">Order #ED-{order.id.toString().padStart(6, '0')} is confirmed for development.</p>
+        <p className="eyebrow">{order.status === 'paid' ? 'Payment complete' : 'Order created'}</p>
+        <h1>{order.status === 'paid' ? 'Thanks for your order.' : 'Your unit is on hold.'}</h1>
+        <p className="flow-lead">Order #ED-{order.id.toString().padStart(6, '0')} · {order.status}</p>
+        {order.status === 'pending' && <>
+          {order.reservation && <p className="reservation-countdown">
+            Complete payment in <ReservationCountdown
+              expiresAt={order.reservation.expires_at}
+              serverOffset={reservationServerOffset}
+            /> to keep your drop item.
+          </p>}
+          <div className="confirmation-actions">
+            <ActionButton disabled={busy} onClick={() => void updateOrder('pay')}>
+              {busy ? 'Processing…' : 'Confirm simulated payment'}
+            </ActionButton>
+            <button className="inline-action" type="button" disabled={busy} onClick={() => void updateOrder('cancel')}>
+              Cancel order
+            </button>
+          </div>
+        </>}
+        {(order.status === 'expired' || order.status === 'cancelled') && <p className="form-error">
+          This order is {order.status}; its inventory is available again.
+        </p>}
         <div className="confirmation-details">
           <div><strong>Delivery to</strong><p>{order.shipping_address.recipient}<br />{order.shipping_address.line1}<br />{order.shipping_address.city}, {order.shipping_address.region} {order.shipping_address.postal_code}<br />{order.shipping_address.country}</p></div>
           <div><strong>Demo payment</strong><p>Simulated card · {order.payment?.status}</p><strong>Total</strong><p>${order.total}</p></div>

@@ -1,5 +1,5 @@
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import './App.css'
 import './flows.css'
 import './cart-checkout.css'
@@ -12,6 +12,7 @@ import ProductPage from './ProductPage'
 import { StoreProvider } from './StoreContext'
 import { useStore } from './store-context'
 import StoreLayout from './StoreLayout'
+import ReservationCountdown from './components/ReservationCountdown'
 import { AdminDashboard, AdminDrops, AdminLogin, AdminProducts, AdminUsers, AdminGate, AdminLayout } from './admin/AdminPanel'
 
 function AccountGate({ children }: { children: ReactNode }) {
@@ -26,8 +27,31 @@ function NotFound() {
   return <main className="flow-page"><section className="flow-card"><p className="eyebrow">Not found</p><h1>This page has left the district.</h1><Link className="button button-dark" to="/">Return home</Link></section></main>
 }
 
+function ReservationBanner() {
+  const { reservation, reservationServerOffset, refreshReservation } = useStore()
+  const [error, setError] = useState<string | null>(null)
+  const handleExpire = useCallback(() => {
+    refreshReservation().then(() => setError(null)).catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : 'No se pudo actualizar la reserva.')
+    })
+  }, [refreshReservation])
+
+  if (!reservation) return null
+  return <aside className="reservation-banner" aria-label="Reserva de inventario activa">
+    <span>Tu unidad está reservada por <ReservationCountdown
+      expiresAt={reservation.expires_at}
+      serverOffset={reservationServerOffset}
+      onExpire={handleExpire}
+    /></span>
+    <Link to={`/orders/${reservation.order_id}/confirmation`}>Completar pago</Link>
+    {error && <span className="reservation-banner-error" role="alert">{error}</span>}
+  </aside>
+}
+
 function AppRoutes() {
-  return <Routes>
+  return <>
+    <ReservationBanner />
+    <Routes>
     <Route path="/admin/login" element={<AdminLogin />} />
     <Route path="/admin" element={<AdminGate><AdminLayout /></AdminGate>}>
       <Route index element={<Navigate to="dashboard" replace />} />
@@ -46,7 +70,8 @@ function AppRoutes() {
       <Route path="account" element={<AccountGate><AccountPage /></AccountGate>} />
       <Route path="*" element={<NotFound />} />
     </Route>
-  </Routes>
+    </Routes>
+  </>
 }
 
 function App() {

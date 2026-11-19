@@ -3,7 +3,7 @@ import os
 from flask import Flask
 from flask_cors import CORS
 
-from app.config import config
+from app.config import _normalize_database_url, config
 from app.extensions import db, login_manager, migrate
 from app import models  # noqa: F401  # fuerza la carga de todos los modelos SQLAlchemy
 from app.routes import register_routes
@@ -32,6 +32,11 @@ def create_app(config_name: str = 'default') -> Flask:
         or secret_key.strip().lower() in unsafe_secret_values
     ):
         raise RuntimeError('Configura una SECRET_KEY segura antes de iniciar en producción')
+    if config_name == 'production':
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url or not database_url.startswith(('postgresql://', 'postgresql+')):
+            raise RuntimeError('La concurrencia de inventario en producción requiere PostgreSQL; configura DATABASE_URL')
+        app.config['SQLALCHEMY_DATABASE_URI'] = _normalize_database_url(database_url)
     app.config['SECRET_KEY'] = secret_key or app.config.get('SECRET_KEY', 'dev-secret-key')
     app.config['CORS_ORIGINS'] = [
         origin.strip()
@@ -93,5 +98,9 @@ def register_admin_commands(app: Flask) -> None:
         user.password_hash = generate_password_hash(password)
         user.is_admin = True
         user.is_active = True
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
         click.echo(f'Cuenta administradora lista: {normalized_email}')

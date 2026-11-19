@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { apiRequest } from './api'
-import { StoreContext, type StoreContextValue } from './store-context'
+import { StoreContext, type CheckoutReservation, type StoreContextValue } from './store-context'
 import type { CartItem, User } from './types'
 
 const GUEST_CART_KEY = 'exitdrop.guest-cart'
@@ -23,6 +23,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [authReady, setAuthReady] = useState(false)
   const [cart, setCart] = useState<CartItem[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [reservation, setReservation] = useState<CheckoutReservation | null>(null)
+  const [reservationServerOffset, setReservationServerOffset] = useState(0)
 
   const refreshCart = useCallback(async () => {
     if (!user) {
@@ -32,6 +34,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const response = await apiRequest<{ items: CartItem[] }>('/cart')
     setCart(response.items)
   }, [user])
+
+  const refreshReservation = useCallback(async () => {
+    const response = await apiRequest<{
+      reservation: CheckoutReservation | null
+      server_time: string
+    }>('/checkout/reservation')
+    setReservation(response.reservation)
+    setReservationServerOffset(Date.parse(response.server_time) - Date.now())
+  }, [])
 
   const mergeGuestCart = useCallback(async () => {
     const guestItems = readGuestCart()
@@ -59,6 +70,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       const response = await apiRequest<{ items: CartItem[] }>('/cart')
       if (!cancelled) setCart(response.items)
+      await refreshReservation()
     }).catch((reason: unknown) => {
       if (!cancelled && !(reason instanceof Error && 'status' in reason && reason.status === 401)) {
         setError(reason instanceof Error ? reason.message : 'No se pudo cargar la sesión.')
@@ -68,7 +80,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setAuthReady(true)
     })
     return () => { cancelled = true }
-  }, [])
+  }, [refreshReservation])
 
   const addToCart = useCallback(async (product: CartItem, quantity: number) => {
     setError(null)
@@ -128,7 +140,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await mergeGuestCart()
     const response = await apiRequest<{ items: CartItem[] }>('/cart')
     setCart(response.items)
-  }, [mergeGuestCart])
+    await refreshReservation()
+  }, [mergeGuestCart, refreshReservation])
 
   const adminSignIn = useCallback(async (email: string, password: string, challengeId: string, captchaAnswer: string) => {
     const signedInUser = await apiRequest<User>('/admin/auth/login', {
@@ -144,7 +157,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await mergeGuestCart()
     const response = await apiRequest<{ items: CartItem[] }>('/cart')
     setCart(response.items)
-  }, [mergeGuestCart])
+    await refreshReservation()
+  }, [mergeGuestCart, refreshReservation])
 
   const register = useCallback(async (name: string, email: string, password: string) => {
     const registeredUser = await apiRequest<User>('/auth/register', {
@@ -155,12 +169,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await mergeGuestCart()
     const response = await apiRequest<{ items: CartItem[] }>('/cart')
     setCart(response.items)
-  }, [mergeGuestCart])
+    await refreshReservation()
+  }, [mergeGuestCart, refreshReservation])
 
   const signOut = useCallback(async () => {
     await apiRequest('/auth/logout', { method: 'POST' })
     setUser(null)
     setCart(readGuestCart())
+    setReservation(null)
   }, [])
 
   const value = useMemo<StoreContextValue>(() => ({
@@ -170,6 +186,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     cartCount: cart.reduce((count, item) => count + item.quantity, 0),
     subtotal: cart.reduce((total, item) => total + Number(item.line_total), 0),
     error,
+    reservation,
+    reservationServerOffset,
     clearError: () => setError(null),
     addToCart,
     setQuantity,
@@ -179,7 +197,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     register,
     signOut,
     refreshCart,
-  }), [user, authReady, cart, error, addToCart, setQuantity, removeItem, signIn, adminSignIn, register, signOut, refreshCart])
+    refreshReservation,
+  }), [user, authReady, cart, error, reservation, reservationServerOffset, addToCart, setQuantity, removeItem, signIn, adminSignIn, register, signOut, refreshCart, refreshReservation])
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

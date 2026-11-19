@@ -23,3 +23,7 @@
 .summary-add-items{color:#9d452d;display:inline-block;font-size:10px;font-weight:700;margin:0 0 11px;text-decoration:underline}
 .order-summary>.button:focus-visible{outline:2px solid #853a26;outline-offset:3px}
 @media(max-width:760px){.cart-hover-region:has(.cart-popover)::after{display:none}.summary-product{grid-template-columns:45px minmax(0,1fr) auto}.summary-product-controls{gap:4px}}
+.reservation-countdown{font-size:13px;font-weight:600}
+.reservation-countdown time{color:#a64a30;font-variant-numeric:tabular-nums;font-weight:800}
+.confirmation-actions{align-items:center;display:flex;flex-wrap:wrap;gap:14px;margin:18px 0}
+.confirmation-actions button:disabled{cursor:wait;opacity:.65}

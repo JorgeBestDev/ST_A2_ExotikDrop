@@ -4,7 +4,8 @@ from flask_login import current_user, login_required
 from app.extensions import db
 from app.models.orders import Order
 from app.models.users import User
-from app.services.inventory import expire_reservations
+from app.services.inventory import as_utc, expire_reservations
+from app.services.transactions import rollback_on_error
 
 bp = Blueprint('orders', __name__, url_prefix='/api/orders')
 
@@ -34,12 +35,17 @@ def serialize_order(order):
             'total_price': float(item.total_price),
         } for item in order.items],
         'payment': {'method': order.payment.method, 'status': order.payment.status} if order.payment else None,
+        'reservation': {
+            'status': order.inventory_reservation.status,
+            'expires_at': as_utc(order.inventory_reservation.expires_at).isoformat(),
+        } if order.inventory_reservation else None,
     }
 
 
 @bp.route('', methods=['GET'])
 @bp.route('/', methods=['GET'])
 @login_required
+@rollback_on_error
 def get_orders():
     User.query.filter_by(id=current_user.id).with_for_update().first()
     expire_reservations(current_user.id)
@@ -54,6 +60,7 @@ def get_orders():
 
 @bp.route('/<int:order_id>', methods=['GET'])
 @login_required
+@rollback_on_error
 def get_order(order_id):
     User.query.filter_by(id=current_user.id).with_for_update().first()
     expire_reservations(current_user.id)

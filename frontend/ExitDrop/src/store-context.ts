@@ -1,6 +1,11 @@
 import { createContext, useContext } from 'react'
 import type { CartItem, User } from './types'
 
+export type CheckoutReservation = {
+  order_id: number
+  expires_at: string
+}
+
 export type StoreContextValue = {
   user: User | null
   authReady: boolean
@@ -8,6 +13,8 @@ export type StoreContextValue = {
   cartCount: number
   subtotal: number
   error: string | null
+  reservation: CheckoutReservation | null
+  reservationServerOffset: number
   clearError: () => void
   addToCart: (product: CartItem, quantity: number) => Promise<void>
   setQuantity: (item: CartItem, quantity: number) => Promise<void>
@@ -17,6 +24,7 @@ export type StoreContextValue = {
   register: (name: string, email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   refreshCart: () => Promise<void>
+  refreshReservation: () => Promise<void>
 }
 
 export const StoreContext = createContext<StoreContextValue | null>(null)
