@@ -20,6 +20,11 @@ class User(UserMixin, db.Model):
     carts = db.relationship('Cart', back_populates='user', cascade='all, delete-orphan')
     password_reset_tokens = db.relationship('PasswordResetToken', back_populates='user', cascade='all, delete-orphan')
     addresses = db.relationship('ShippingAddress', back_populates='user', cascade='all, delete-orphan')
+    inventory_reservations = db.relationship(
+        'InventoryReservation',
+        back_populates='user',
+        cascade='all, delete-orphan',
+    )
 
     def __repr__(self):
         return f'<User {self.email}>'

@@ -1,7 +1,10 @@
 from flask import Blueprint, jsonify
 from flask_login import current_user, login_required
 
+from app.extensions import db
 from app.models.orders import Order
+from app.models.users import User
+from app.services.inventory import expire_reservations
 
 bp = Blueprint('orders', __name__, url_prefix='/api/orders')
 
@@ -38,7 +41,10 @@ def serialize_order(order):
 @bp.route('/', methods=['GET'])
 @login_required
 def get_orders():
+    User.query.filter_by(id=current_user.id).with_for_update().first()
+    expire_reservations(current_user.id)
     orders = Order.query.filter_by(user_id=current_user.id).order_by(Order.id.desc()).all()
+    db.session.commit()
     return jsonify({
         'success': True,
         'data': [serialize_order(order) for order in orders],
@@ -49,7 +55,10 @@ def get_orders():
 @bp.route('/<int:order_id>', methods=['GET'])
 @login_required
 def get_order(order_id):
+    User.query.filter_by(id=current_user.id).with_for_update().first()
+    expire_reservations(current_user.id)
     order = Order.query.filter_by(id=order_id, user_id=current_user.id).first()
+    db.session.commit()
 
     if order is None:
         return jsonify({

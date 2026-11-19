@@ -10,6 +10,7 @@ class Order(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     total = db.Column(db.Numeric(10, 2), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='pending')
+    checkout_key = db.Column(db.String(64), nullable=True)
     shipping_recipient = db.Column(db.String(255), nullable=False, default='')
     shipping_phone = db.Column(db.String(40), nullable=False, default='')
     shipping_line1 = db.Column(db.String(255), nullable=False, default='')
@@ -23,6 +24,16 @@ class Order(db.Model):
     user = db.relationship('User', back_populates='orders')
     items = db.relationship('OrderItem', back_populates='order', cascade='all, delete-orphan')
     payment = db.relationship('Payment', back_populates='order', uselist=False, cascade='all, delete-orphan')
+    inventory_reservation = db.relationship(
+        'InventoryReservation',
+        back_populates='order',
+        uselist=False,
+        cascade='all, delete-orphan',
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'checkout_key', name='uq_order_user_checkout_key'),
+    )
 
     def __repr__(self):
         return f'<Order {self.id}>'
