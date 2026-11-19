@@ -50,7 +50,7 @@ def test_admin_login_requires_captcha_and_admin_role(app):
         'password': 'admin-password-123',
     })
     assert regular_login.status_code == 200
-    assert client.get('/api/admin/dashboard').status_code == 403
+    assert client.get('/api/admin/dashboard').status_code == 401
     assert client.get('/api/users').status_code == 403
     client.post('/api/auth/logout')
 
@@ -70,6 +70,44 @@ def test_admin_login_requires_captcha_and_admin_role(app):
         'challenge_id': captcha['challenge_id'],
         'captcha_answer': str(left * right),
     }).status_code == 400
+
+
+def test_admin_and_customer_sessions_are_independent(app):
+    create_admin(app)
+    client = app.test_client()
+
+    challenge = client.get('/api/admin/auth/captcha').json['data']
+    left, right = map(int, re.search(r'(\d+) × (\d+)', challenge['question']).groups())
+    admin_login = client.post('/api/admin/auth/login', json={
+        'email': 'admin@example.test',
+        'password': 'admin-password-123',
+        'challenge_id': challenge['challenge_id'],
+        'captcha_answer': str(left * right),
+    })
+
+    assert admin_login.status_code == 200
+    assert 'exitdrop_admin_session=' in admin_login.headers.get('Set-Cookie', '')
+    assert 'exitdrop_customer_session=' not in admin_login.headers.get('Set-Cookie', '')
+    assert 'Path=/api/admin' in admin_login.headers.get('Set-Cookie', '')
+    assert client.get('/api/admin/auth/me').status_code == 200
+    assert client.get('/api/auth/me').status_code == 401
+    assert client.get('/api/cart').status_code == 401
+
+    customer_login = client.post('/api/auth/login', json={
+        'email': 'admin@example.test',
+        'password': 'admin-password-123',
+    })
+    assert customer_login.status_code == 200
+    assert 'exitdrop_customer_session=' in customer_login.headers.get('Set-Cookie', '')
+    assert client.get('/api/auth/me').status_code == 200
+    assert client.get('/api/admin/auth/me').status_code == 200
+
+    assert client.post('/api/auth/logout').status_code == 200
+    assert client.get('/api/auth/me').status_code == 401
+    assert client.get('/api/admin/auth/me').status_code == 200
+
+    assert client.post('/api/admin/auth/logout').status_code == 200
+    assert client.get('/api/admin/auth/me').status_code == 401
 
 
 def test_captcha_is_consumed_on_wrong_answer(app):

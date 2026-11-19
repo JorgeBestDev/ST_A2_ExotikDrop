@@ -327,8 +327,11 @@ La API se expone bajo prefijo /api.
 
 - El panel web tiene rutas separadas en `/admin/login` y `/admin/dashboard`.
 - El inicio de sesión administrativo requiere una cuenta con `is_admin`, CAPTCHA
-  local validado en el backend y una sesión exclusiva del panel. Iniciar sesión
-  desde `/login` no concede acceso administrativo.
+  local validado en el backend y una cookie HttpOnly separada, limitada a
+  `/api/admin`. La cookie de clientes se llama `exitdrop_customer_session`.
+  Iniciar sesión en un panel no inicia sesión en el otro; cerrar uno tampoco
+  cierra el otro. El cambio invalida sesiones de cliente anteriores para evitar
+  reutilizar una cookie que antes compartía la autenticación administrativa.
 - El CAPTCHA local es un desafío matemático de un solo uso, almacenado con
   expiración en la base de datos. Proporciona una barrera básica y no sustituye
   un servicio anti-bots especializado para despliegues expuestos a ataques.

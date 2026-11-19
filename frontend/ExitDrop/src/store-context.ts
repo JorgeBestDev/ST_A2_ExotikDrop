@@ -8,7 +8,10 @@ export type CheckoutReservation = {
 
 export type StoreContextValue = {
   user: User | null
+  adminUser: User | null
   authReady: boolean
+  adminAuthReady: boolean
+  adminAuthError: string | null
   cart: CartItem[]
   cartCount: number
   subtotal: number
@@ -21,6 +24,8 @@ export type StoreContextValue = {
   removeItem: (item: CartItem) => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
   adminSignIn: (email: string, password: string, challengeId: string, captchaAnswer: string) => Promise<void>
+  adminSignOut: () => Promise<void>
+  refreshAdminSession: () => Promise<void>
   register: (name: string, email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   refreshCart: () => Promise<void>
