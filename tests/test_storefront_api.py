@@ -4,6 +4,9 @@ from decimal import Decimal
 from app.extensions import db
 from app.models.categories import Category
 from app.models.drops import Drop
+from app.models.inventory_reservations import InventoryReservation
+from app.models.orders import Order
+from app.models.payments import Payment
 from app.models.products import Product
 
 
@@ -101,7 +104,7 @@ def test_guest_cart_merge_and_checkout_snapshot(app, client):
     checkout = client.post('/api/orders', json={
         'address_id': address_id,
         'payment_method': 'simulated_card',
-    })
+    }, headers={'Idempotency-Key': 'checkout-test-key'})
     assert checkout.status_code == 201
     assert checkout.json['data']['total'] == '50.00'
     assert checkout.json['data']['payment'] == {
@@ -110,7 +113,20 @@ def test_guest_cart_merge_and_checkout_snapshot(app, client):
     }
     assert checkout.json['data']['shipping_address']['recipient'] == 'Test Buyer'
     assert client.get('/api/cart').json['data']['count'] == 0
+    retry = client.post('/api/orders', json={
+        'address_id': address_id,
+        'payment_method': 'simulated_card',
+    }, headers={'Idempotency-Key': 'checkout-test-key'})
+    assert retry.status_code == 200
+    assert retry.json['data']['id'] == checkout.json['data']['id']
 
+    with app.app_context():
+        product = db.session.get(Product, product_id)
+        assert product.stock == 5
+
+    payment = client.post(f"/api/orders/{checkout.json['data']['id']}/pay")
+    assert payment.status_code == 200, payment.json
+    assert payment.json['data']['status'] == 'paid'
     with app.app_context():
         product = db.session.get(Product, product_id)
         assert product.stock == 3
@@ -143,13 +159,96 @@ def test_user_cannot_read_another_users_order(app):
     order = first_client.post('/api/orders', json={
         'address_id': address_response.json['data']['id'],
         'payment_method': 'simulated_card',
-    })
+    }, headers={'Idempotency-Key': 'checkout-first-user'})
     assert order.status_code == 201
     assert register(second_client, 'second@example.test').status_code == 201
 
     response = second_client.get(f"/api/orders/{order.json['data']['id']}")
 
     assert response.status_code == 404
+
+
+def test_drop_checkout_reserves_stock_until_demo_payment(app):
+    now = datetime.now(timezone.utc)
+    drop_id = create_drop(
+        app,
+        'Limited drop',
+        'active',
+        now - timedelta(hours=1),
+        now + timedelta(hours=1),
+    )
+    with app.app_context():
+        product_id = db.session.get(Drop, drop_id).products[0].id
+
+    buyer = app.test_client()
+    assert register(buyer, 'drop-buyer@example.test').status_code == 201
+    address = create_address(buyer).json['data']
+    assert buyer.post('/api/cart/items', json={'product_id': product_id, 'quantity': 3}).status_code == 200
+    checkout = buyer.post('/api/orders', json={
+        'address_id': address['id'],
+        'payment_method': 'simulated_card',
+    }, headers={'Idempotency-Key': 'drop-checkout-once'})
+
+    assert checkout.status_code == 201
+    assert checkout.json['data']['status'] == 'pending'
+    assert checkout.json['data']['reservation']['status'] == 'active'
+
+    with app.app_context():
+        product = db.session.get(Product, product_id)
+        assert product.stock == 4
+        reservation = InventoryReservation.query.one()
+        assert abs((reservation.expires_at - reservation.created_at).total_seconds() - 600) < 1
+
+    assert buyer.post(
+        '/api/cart/items',
+        json={'product_id': product_id, 'quantity': 2},
+    ).status_code == 409
+
+    payment = buyer.post(f"/api/orders/{checkout.json['data']['id']}/pay")
+
+    assert payment.status_code == 200, payment.json
+    assert payment.json['data']['status'] == 'paid'
+    assert buyer.get('/api/checkout/reservation').json['data']['reservation'] is None
+    with app.app_context():
+        assert db.session.get(Product, product_id).stock == 1
+        assert InventoryReservation.query.one().status == 'consumed'
+
+
+def test_expired_drop_reservation_releases_inventory_and_expires_order(app):
+    now = datetime.now(timezone.utc)
+    create_drop(
+        app,
+        'Expiring drop',
+        'active',
+        now - timedelta(hours=1),
+        now + timedelta(hours=1),
+    )
+    with app.app_context():
+        product_id = Drop.query.one().products[0].id
+
+    buyer = app.test_client()
+    assert register(buyer, 'expiring-buyer@example.test').status_code == 201
+    address = create_address(buyer).json['data']
+    buyer.post('/api/cart/items', json={'product_id': product_id, 'quantity': 4})
+    checkout = buyer.post('/api/orders', json={
+        'address_id': address['id'],
+        'payment_method': 'simulated_card',
+    }, headers={'Idempotency-Key': 'expiring-drop-checkout'})
+    order_id = checkout.json['data']['id']
+
+    with app.app_context():
+        reservation = InventoryReservation.query.one()
+        reservation.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.session.commit()
+
+    response = buyer.get('/api/checkout/reservation')
+
+    assert response.status_code == 200
+    assert response.json['data']['reservation'] is None
+    with app.app_context():
+        assert db.session.get(Order, order_id).status == 'expired'
+        assert Payment.query.one().status == 'expired'
+        assert InventoryReservation.query.one().status == 'expired'
 
 
 def test_featured_drop_returns_active_drop_and_its_active_products(app, client):

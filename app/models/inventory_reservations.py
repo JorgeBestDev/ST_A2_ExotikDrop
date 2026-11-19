@@ -11,7 +11,6 @@ class InventoryReservation(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False, unique=True)
-    idempotency_key = db.Column(db.String(64), nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='active')
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -25,7 +24,6 @@ class InventoryReservation(db.Model):
     )
 
     __table_args__ = (
-        db.UniqueConstraint('user_id', 'idempotency_key', name='uq_inventory_reservation_user_key'),
         db.CheckConstraint(
             "status IN ('active', 'consumed', 'expired', 'released')",
             name='ck_inventory_reservation_status',
@@ -58,6 +56,7 @@ class InventoryReservationItem(db.Model):
     __table_args__ = (
         db.UniqueConstraint('reservation_id', 'product_id', name='uq_reservation_product'),
         db.CheckConstraint('quantity > 0', name='ck_reservation_item_quantity_positive'),
+        db.Index('ix_inventory_reservation_item_product', 'product_id'),
     )
 
     def __repr__(self):

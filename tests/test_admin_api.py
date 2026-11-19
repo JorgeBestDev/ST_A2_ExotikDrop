@@ -9,6 +9,7 @@ from app import create_app
 from app.extensions import db
 from app.models.categories import Category
 from app.models.drops import Drop
+from app.models.inventory_reservations import InventoryReservation, InventoryReservationItem
 from app.models.order_items import OrderItem
 from app.models.orders import Order
 from app.models.products import Product
@@ -141,7 +142,7 @@ def test_dashboard_aggregates_monthly_orders_best_product_and_latest_drop(app, c
         )
         db.session.add_all([product, user])
         db.session.flush()
-        order = Order(user_id=user.id, total=Decimal('160.00'), status='pending', created_at=now)
+        order = Order(user_id=user.id, total=Decimal('160.00'), status='paid', created_at=now)
         db.session.add(order)
         db.session.flush()
         db.session.add(OrderItem(
@@ -151,6 +152,24 @@ def test_dashboard_aggregates_monthly_orders_best_product_and_latest_drop(app, c
             quantity=2,
             unit_price=Decimal('80.00'),
             total_price=Decimal('160.00'),
+        ))
+        pending_order = Order(user_id=user.id, total=Decimal('40.00'), status='pending', created_at=now)
+        db.session.add(pending_order)
+        db.session.flush()
+        db.session.add(OrderItem(
+            order_id=pending_order.id,
+            product_id=product.id,
+            drop_id=drop.id,
+            quantity=1,
+            unit_price=Decimal('40.00'),
+            total_price=Decimal('40.00'),
+        ))
+        db.session.add(InventoryReservation(
+            user_id=user.id,
+            order_id=pending_order.id,
+            expires_at=now + timedelta(minutes=5),
+            status='active',
+            items=[InventoryReservationItem(product_id=product.id, quantity=3)],
         ))
         product_id = product.id
         db.session.commit()
@@ -169,7 +188,7 @@ def test_dashboard_aggregates_monthly_orders_best_product_and_latest_drop(app, c
     }
     assert data['latest_drop']['name'] == 'Night Shift'
     assert data['latest_drop']['sales'] == 160.0
-    assert data['latest_drop']['remaining_units'] == 7
+    assert data['latest_drop']['remaining_units'] == 4
     assert 0 < data['latest_drop']['remaining_seconds'] <= 3 * 60 * 60
 
     with app.app_context():
@@ -307,6 +326,7 @@ def test_production_requires_a_configured_secret_key(monkeypatch):
 def test_production_forces_secure_session_cookies(monkeypatch):
     monkeypatch.setenv('SECRET_KEY', 'a-strong-random-secret-that-is-at-least-32-chars')
     monkeypatch.setenv('SESSION_COOKIE_SECURE', 'False')
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://user:password@localhost:5432/exitdrop')
 
     production_app = create_app('production')
 

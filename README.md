@@ -162,6 +162,7 @@ Los modelos principales son:
 - user_id
 - total
 - status
+- checkout_key (idempotencia del checkout)
 - shipping_recipient
 - shipping_phone
 - shipping_line1
@@ -171,7 +172,15 @@ Los modelos principales son:
 - shipping_postal_code
 - shipping_country
 - created_at
-- relaciones: user, items, payment
+- relaciones: user, items, payment, inventory_reservation
+
+### InventoryReservation
+- user_id
+- order_id
+- expires_at
+- status (`active`, `consumed`, `expired` o `released`)
+- items con producto y cantidad reservada
+- una sola reserva activa por usuario
 
 ### OrderItem
 - id
@@ -238,9 +247,11 @@ relaciones del esquema:
 | `products` | Contiene el inventario que se muestra en la tienda. | Pertenece a una categoría y opcionalmente a un drop; se relaciona con carritos y pedidos. |
 | `carts` | Representa el carrito de un usuario. | Pertenece a un usuario y contiene muchos `cart_items`. |
 | `cart_items` | Guarda los productos y cantidades elegidos en un carrito. | Une `carts` con `products`; la combinación `cart_id` + `product_id` es única. |
-| `orders` | Guarda la compra confirmada y su estado. | Pertenece a un usuario y contiene muchos `order_items`; puede tener un pago. |
+| `orders` | Guarda cada pedido y su estado de pago/checkout. | Pertenece a un usuario y contiene muchos `order_items`; puede tener un pago y una reserva. |
 | `order_items` | Conserva el detalle de una compra. | Une `orders` con `products`, conserva precio y drop al momento de comprar. |
 | `payments` | Registra el método, importe y estado del pago. | Se relaciona con una orden. |
+| `inventory_reservations` | Bloquea unidades limitadas hasta pagar o vencer a los 10 minutos. | Pertenece a un usuario y pedido; las líneas apuntan a productos. |
+| `inventory_reservation_items` | Guarda las cantidades apartadas por producto. | Une `inventory_reservations` con `products`. |
 | `admin_captcha_challenges` | Guarda CAPTCHA de un solo uso y fallos temporales de autenticación administrativa. | Conserva huellas IP firmadas para límites temporales; no almacena direcciones IP en claro. |
 | `password_reset_tokens` | Permite gestionar recuperación de contraseñas. | Cada token pertenece a un usuario. |
 
@@ -265,12 +276,22 @@ relaciones del esquema:
 1. El usuario consulta `categories` y `products` desde el catálogo.
 2. El frontend crea o recupera un registro en `carts`.
 3. Cada selección se guarda en `cart_items` con su cantidad.
-4. Al confirmar la compra, se crea una fila en `orders`.
+4. Al confirmar el checkout, se crea una orden pendiente con una clave de
+   idempotencia. Los artículos asociados a drops se reservan durante 10 minutos;
+   las demás unidades siguen disponibles hasta confirmar el pago simulado.
 5. Los elementos del carrito pasan a `order_items`, conservando `unit_price` y
    `total_price` para mantener el historial aunque cambie el precio del
    producto.
-6. El resultado del cobro se registra en `payments` y actualiza el estado de
-   la orden.
+6. El pago simulado y el descuento del inventario se confirman juntos dentro de
+   una transacción. Al cancelar, el pedido y su pago quedan cancelados; al vencer,
+   quedan expirados. En ambos casos las unidades vuelven a estar disponibles.
+
+Las operaciones de checkout y pago bloquean las filas de usuario y producto en
+un orden estable y usan restricciones de base de datos para impedir inventario
+negativo y reservas duplicadas. Estos bloqueos requieren PostgreSQL; SQLite se
+mantiene para desarrollo y pruebas, y la configuración de producción la rechaza.
+La expiración se calcula contra el reloj del servidor y se materializa cuando se
+consulta o modifica la reserva, sin depender de un proceso en segundo plano.
 
 ### Entornos y migraciones
 
@@ -322,7 +343,8 @@ La API se expone bajo prefijo /api.
   El comando solicita email, nombre y contraseña (mínimo 8 caracteres); no hay
   una ruta pública para asignar el rol. Usa contraseñas únicas y configura una
   `SECRET_KEY` aleatoria de al menos 32 caracteres antes de desplegar. La
-  aplicación rechaza claves de ejemplo en producción y fuerza cookies `Secure`.
+  aplicación rechaza claves de ejemplo, exige PostgreSQL en producción y fuerza
+  cookies `Secure`.
   Activa esa configuración con `FLASK_ENV=production` o `FLASK_CONFIG=production`.
 - Ejecuta las migraciones antes de iniciar la aplicación para añadir el estado
   de usuario y los desafíos CAPTCHA:
@@ -331,11 +353,9 @@ La API se expone bajo prefijo /api.
   flask --app app.py db upgrade
   ```
 
-- Las ventas del dashboard suman los pedidos creados en el mes, incluso si su
-  pago permanece `pending`, ya que el checkout actual todavía no procesa pagos
-  aprobados. El producto líder cuenta unidades históricas. Para el drop iniciado
-  más recientemente se muestran los pedidos asociados a sus productos, stock
-  restante y tiempo hasta `ends_at`.
+- Las ventas del dashboard, el producto líder y las ventas del drop cuentan
+  únicamente pedidos pagados. Las unidades restantes descuentan las reservas
+  activas.
 - La baja de usuarios y productos es una desactivación que conserva el historial.
   Los drops con productos asociados no se eliminan hasta desvincularlos.
 - En el formulario de productos, selecciona una imagen JPG, PNG, WebP o AVIF
@@ -413,7 +433,10 @@ pedidos, carritos y direcciones al usuario autenticado.
 
 - GET /api/orders
 - GET /api/orders/<order_id>
-- POST /api/orders (checkout local con método `simulated_card`)
+- POST /api/orders (checkout con `Idempotency-Key` y método `simulated_card`)
+- GET /api/checkout/reservation (reserva activa del usuario y hora del servidor)
+- POST /api/orders/<order_id>/pay (confirmación de pago simulado)
+- POST /api/orders/<order_id>/cancel (cancelación/liberación de reserva)
 
 ### Order items
 
@@ -507,8 +530,10 @@ CORS_ORIGINS=http://localhost:5173
 DEBUG=True
 ```
 
-El método de pago del checkout actual es una simulación. No se solicita ni se
-almacena el número de tarjeta o su código de seguridad.
+El pago es una simulación: no se solicita ni se almacena el número de tarjeta ni
+el código de seguridad. Las reservas de drops duran 10 minutos y su contador se
+muestra de forma global mientras estén activas. SQLite solo sirve para desarrollo
+y pruebas; configura PostgreSQL para producción.
 
 ## 10. Cómo ejecutar el proyecto en desarrollo
 
@@ -568,7 +593,8 @@ El proyecto cuenta con:
 - catálogo React conectado a productos y categorías del API
 - detalle de producto, carrito invitado y carrito persistente para usuarios
 - registro, inicio/cierre de sesión y gestión de perfil y direcciones
-- checkout de desarrollo que crea pedidos y registra únicamente el método/estado simulado
+- checkout con clave idempotente, reservas de drops por 10 minutos y pago
+  simulado que descuenta inventario al confirmarse
 - historial de pedidos y actividad de pagos en la cuenta
 
 ## 12. Roadmap futuro

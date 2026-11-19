@@ -528,7 +528,7 @@ def get_current_reservation():
     return jsonify(success=True, data={
         'reservation': {
             'order_id': reservation.order_id,
-            'expires_at': reservation.expires_at.isoformat(),
+            'expires_at': as_utc(reservation.expires_at).isoformat(),
         } if reservation else None,
         'server_time': now.isoformat(),
     }), 200
@@ -550,7 +550,7 @@ def confirm_simulated_payment(order_id):
 
     reservation = InventoryReservation.query.filter_by(order_id=order.id).with_for_update().first()
     if reservation is not None and (
-        reservation.status != 'active' or reservation.expires_at <= now
+        reservation.status != 'active' or as_utc(reservation.expires_at) <= now
     ):
         if reservation.status == 'active':
             reservation.status = 'expired'

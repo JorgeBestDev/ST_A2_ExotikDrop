@@ -21,6 +21,8 @@ from app.models.order_items import OrderItem
 from app.models.orders import Order
 from app.models.products import Product
 from app.models.users import User
+from app.services.inventory import reserved_quantities
+from app.services.transactions import rollback_on_error
 
 bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 CAPTCHA_LIFETIME = timedelta(minutes=3)
@@ -115,6 +117,7 @@ def normalized_email(value):
 
 
 @bp.get('/auth/captcha')
+@rollback_on_error
 def get_admin_captcha():
     now = datetime.now(timezone.utc)
     expiration = now - LOGIN_FAILURE_WINDOW
@@ -148,6 +151,7 @@ def get_admin_captcha():
 
 
 @bp.post('/auth/login')
+@rollback_on_error
 def admin_login():
     data = request_object()
     if data is None:
@@ -222,6 +226,7 @@ def admin_me():
 
 @bp.post('/auth/logout')
 @admin_required
+@rollback_on_error
 def admin_logout():
     logout_user()
     session.pop('admin_authenticated', None)
@@ -241,6 +246,7 @@ def dashboard():
     monthly_sales = db.session.query(func.coalesce(func.sum(Order.total), 0)).filter(
         Order.created_at >= month_start,
         Order.created_at < next_month,
+        Order.status == 'paid',
     ).scalar()
     best_product = db.session.query(
         Product.id,
@@ -249,7 +255,7 @@ def dashboard():
         func.sum(OrderItem.total_price).label('revenue'),
     ).join(OrderItem, OrderItem.product_id == Product.id).join(
         Order, Order.id == OrderItem.order_id,
-    ).group_by(Product.id, Product.name).order_by(
+    ).filter(Order.status == 'paid').group_by(Product.id, Product.name).order_by(
         func.sum(OrderItem.quantity).desc(),
         Product.name.asc(),
     ).first()
@@ -264,18 +270,24 @@ def dashboard():
             Order, Order.id == OrderItem.order_id,
         ).filter(
             OrderItem.drop_id == latest_drop.id,
+            Order.status == 'paid',
         ).scalar()
-        remaining_units = db.session.query(func.coalesce(func.sum(Product.stock), 0)).filter(
+        drop_products = Product.query.filter(
             Product.drop_id == latest_drop.id,
             Product.is_active.is_(True),
-        ).scalar()
+        ).all()
+        reserved = reserved_quantities((product.id for product in drop_products), now)
+        remaining_units = sum(
+            max(0, product.stock - reserved.get(product.id, 0))
+            for product in drop_products
+        )
         ends_at = latest_drop.ends_at
         if ends_at.tzinfo is None:
             ends_at = ends_at.replace(tzinfo=timezone.utc)
         drop_summary = {
             **serialize_drop(latest_drop),
             'sales': float(drop_sales or 0),
-            'remaining_units': int(remaining_units or 0),
+            'remaining_units': remaining_units,
             'remaining_seconds': max(0, int((ends_at - now).total_seconds())),
         }
 
@@ -301,6 +313,7 @@ def get_admin_users():
 
 @bp.post('/users')
 @admin_required
+@rollback_on_error
 def create_admin_user():
     data = request_object()
     if data is None:
@@ -342,6 +355,7 @@ def has_another_active_admin(excluded_user_id):
 
 @bp.put('/users/<int:user_id>')
 @admin_required
+@rollback_on_error
 def update_admin_user(user_id):
     user = db.session.get(User, user_id)
     if user is None:
@@ -386,6 +400,7 @@ def update_admin_user(user_id):
 
 @bp.delete('/users/<int:user_id>')
 @admin_required
+@rollback_on_error
 def deactivate_admin_user(user_id):
     user = db.session.get(User, user_id)
     if user is None:
@@ -457,6 +472,7 @@ def product_values(data, product=None):
 
 @bp.post('/products')
 @admin_required
+@rollback_on_error
 def create_admin_product():
     payload = request_object()
     if payload is None:
@@ -472,8 +488,9 @@ def create_admin_product():
 
 @bp.put('/products/<int:product_id>')
 @admin_required
+@rollback_on_error
 def update_admin_product(product_id):
-    product = db.session.get(Product, product_id)
+    product = Product.query.filter_by(id=product_id).with_for_update().first()
     if product is None:
         return jsonify(success=False, message='Producto no encontrado'), 404
     payload = request_object()
@@ -482,6 +499,11 @@ def update_admin_product(product_id):
     data, error = product_values(payload, product)
     if error:
         return jsonify(success=False, message=error), 400
+    reserved = reserved_quantities([product.id]).get(product.id, 0)
+    if data['stock'] < reserved:
+        return jsonify(success=False, message='El inventario no puede quedar por debajo de las unidades reservadas'), 409
+    if not data['is_active'] and reserved:
+        return jsonify(success=False, message='No se puede desactivar un producto con reservas activas'), 409
     for field, value in data.items():
         setattr(product, field, value)
     db.session.commit()
@@ -490,10 +512,13 @@ def update_admin_product(product_id):
 
 @bp.delete('/products/<int:product_id>')
 @admin_required
+@rollback_on_error
 def deactivate_admin_product(product_id):
-    product = db.session.get(Product, product_id)
+    product = Product.query.filter_by(id=product_id).with_for_update().first()
     if product is None:
         return jsonify(success=False, message='Producto no encontrado'), 404
+    if reserved_quantities([product.id]).get(product.id, 0):
+        return jsonify(success=False, message='No se puede desactivar un producto con reservas activas'), 409
     product.is_active = False
     db.session.commit()
     return jsonify(success=True, data=serialize_product(product)), 200
@@ -541,6 +566,7 @@ def get_admin_drops():
 
 @bp.post('/drops')
 @admin_required
+@rollback_on_error
 def create_admin_drop():
     payload = request_object()
     if payload is None:
@@ -556,6 +582,7 @@ def create_admin_drop():
 
 @bp.put('/drops/<int:drop_id>')
 @admin_required
+@rollback_on_error
 def update_admin_drop(drop_id):
     drop = db.session.get(Drop, drop_id)
     if drop is None:
@@ -574,6 +601,7 @@ def update_admin_drop(drop_id):
 
 @bp.delete('/drops/<int:drop_id>')
 @admin_required
+@rollback_on_error
 def delete_admin_drop(drop_id):
     drop = db.session.get(Drop, drop_id)
     if drop is None:
