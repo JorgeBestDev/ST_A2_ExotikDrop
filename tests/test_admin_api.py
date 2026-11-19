@@ -74,6 +74,7 @@ def test_admin_login_requires_captcha_and_admin_role(app):
 
 def test_admin_and_customer_sessions_are_independent(app):
     create_admin(app)
+    app.config['SESSION_COOKIE_PARTITIONED'] = True
     client = app.test_client()
 
     challenge = client.get('/api/admin/auth/captcha').json['data']
@@ -89,6 +90,7 @@ def test_admin_and_customer_sessions_are_independent(app):
     assert 'exitdrop_admin_session=' in admin_login.headers.get('Set-Cookie', '')
     assert 'exitdrop_customer_session=' not in admin_login.headers.get('Set-Cookie', '')
     assert 'Path=/api/admin' in admin_login.headers.get('Set-Cookie', '')
+    assert 'Partitioned' in admin_login.headers.get('Set-Cookie', '')
     assert client.get('/api/admin/auth/me').status_code == 200
     assert client.get('/api/auth/me').status_code == 401
     assert client.get('/api/cart').status_code == 401
@@ -99,6 +101,7 @@ def test_admin_and_customer_sessions_are_independent(app):
     })
     assert customer_login.status_code == 200
     assert 'exitdrop_customer_session=' in customer_login.headers.get('Set-Cookie', '')
+    assert 'Partitioned' in customer_login.headers.get('Set-Cookie', '')
     assert client.get('/api/auth/me').status_code == 200
     assert client.get('/api/admin/auth/me').status_code == 200
 
@@ -371,3 +374,4 @@ def test_production_forces_secure_session_cookies(monkeypatch):
     assert production_app.config['DEBUG'] is False
     assert production_app.config['SESSION_COOKIE_SECURE'] is True
     assert production_app.config['SESSION_COOKIE_SAMESITE'] == 'None'
+    assert production_app.config['SESSION_COOKIE_PARTITIONED'] is True
