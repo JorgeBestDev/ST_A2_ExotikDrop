@@ -154,11 +154,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }),
     })
     setUser(signedInUser)
-    await mergeGuestCart()
-    const response = await apiRequest<{ items: CartItem[] }>('/cart')
-    setCart(response.items)
-    await refreshReservation()
-  }, [mergeGuestCart, refreshReservation])
+    setCart(readGuestCart())
+    setReservation(null)
+  }, [])
 
   const register = useCallback(async (name: string, email: string, password: string) => {
     const registeredUser = await apiRequest<User>('/auth/register', {
