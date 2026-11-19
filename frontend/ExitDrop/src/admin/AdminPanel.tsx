@@ -44,7 +44,7 @@ function formatDateTime(value: string) {
 }
 
 export function AdminGate({ children }: { children: ReactNode }) {
-  const { user, authReady } = useStore()
+  const { adminUser: user, adminAuthReady: authReady, adminAuthError, refreshAdminSession } = useStore()
   const [verification, setVerification] = useState<{ userId: number; status: 'allowed' | 'denied' | 'error'; message?: string } | null>(null)
   const [retry, setRetry] = useState(0)
 
@@ -70,6 +70,9 @@ export function AdminGate({ children }: { children: ReactNode }) {
 
   if (!authReady) {
     return <main className="admin-loading"><span className="admin-spinner" />Verificando acceso…</main>
+  }
+  if (!user && adminAuthError) {
+    return <main className="admin-loading"><AdminFeedback error={adminAuthError} /><button className="admin-secondary-button" onClick={() => void refreshAdminSession().catch(() => undefined)}>Reintentar</button></main>
   }
   if (!user?.is_admin) return <Navigate to="/admin/login" replace />
   if (verification?.userId !== user.id) {
@@ -143,14 +146,14 @@ export function AdminLogin() {
 }
 
 export function AdminLayout() {
-  const { user, signOut } = useStore()
+  const { adminUser: user, adminSignOut } = useStore()
   const navigate = useNavigate()
   const [logoutError, setLogoutError] = useState<string | null>(null)
 
   async function logout() {
     setLogoutError(null)
     try {
-      await signOut()
+      await adminSignOut()
       navigate('/admin/login', { replace: true })
     } catch (reason) {
       setLogoutError(reason instanceof Error ? reason.message : 'No se pudo cerrar la sesión.')

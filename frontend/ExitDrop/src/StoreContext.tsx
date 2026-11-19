@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { apiRequest } from './api'
+import { ApiError, apiRequest } from './api'
 import { StoreContext, type CheckoutReservation, type StoreContextValue } from './store-context'
 import type { CartItem, User } from './types'
 
@@ -20,7 +20,10 @@ function saveGuestCart(items: CartItem[]) {
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [adminUser, setAdminUser] = useState<User | null>(null)
   const [authReady, setAuthReady] = useState(false)
+  const [adminAuthReady, setAdminAuthReady] = useState(false)
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null)
   const [cart, setCart] = useState<CartItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [reservation, setReservation] = useState<CheckoutReservation | null>(null)
@@ -55,30 +58,63 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const refreshAdminSession = useCallback(async () => {
+    setAdminAuthError(null)
+    try {
+      const currentAdmin = await apiRequest<User>('/admin/auth/me')
+      setAdminUser(currentAdmin)
+    } catch (reason) {
+      setAdminUser(null)
+      if (reason instanceof ApiError && reason.status === 401) return
+      const message = reason instanceof Error ? reason.message : 'No se pudo verificar la sesión administrativa.'
+      setAdminAuthError(message)
+      throw reason
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
-    apiRequest<User>('/auth/me').then(async (currentUser) => {
-      if (cancelled) return
-      setUser(currentUser)
-      const guestItems = readGuestCart()
-      if (guestItems.length) {
-        await apiRequest('/cart/merge', {
-          method: 'POST',
-          body: JSON.stringify({ items: guestItems.map((item) => ({ product_id: item.product_id, quantity: item.quantity })) }),
-        })
-        localStorage.removeItem(GUEST_CART_KEY)
+    async function loadCustomerSession() {
+      try {
+        const currentUser = await apiRequest<User>('/auth/me')
+        if (cancelled) return
+        setUser(currentUser)
+        const guestItems = readGuestCart()
+        if (guestItems.length) {
+          await apiRequest('/cart/merge', {
+            method: 'POST',
+            body: JSON.stringify({ items: guestItems.map((item) => ({ product_id: item.product_id, quantity: item.quantity })) }),
+          })
+          localStorage.removeItem(GUEST_CART_KEY)
+        }
+        const response = await apiRequest<{ items: CartItem[] }>('/cart')
+        if (!cancelled) setCart(response.items)
+        await refreshReservation()
+      } catch (reason) {
+        if (!cancelled && !(reason instanceof ApiError && reason.status === 401)) {
+          setError(reason instanceof Error ? reason.message : 'No se pudo cargar la sesión.')
+        }
+        if (!cancelled) setCart(readGuestCart())
+      } finally {
+        if (!cancelled) setAuthReady(true)
       }
-      const response = await apiRequest<{ items: CartItem[] }>('/cart')
-      if (!cancelled) setCart(response.items)
-      await refreshReservation()
-    }).catch((reason: unknown) => {
-      if (!cancelled && !(reason instanceof Error && 'status' in reason && reason.status === 401)) {
-        setError(reason instanceof Error ? reason.message : 'No se pudo cargar la sesión.')
+    }
+
+    async function loadAdminSession() {
+      try {
+        const currentAdmin = await apiRequest<User>('/admin/auth/me')
+        if (!cancelled) setAdminUser(currentAdmin)
+      } catch (reason) {
+        if (!cancelled && !(reason instanceof ApiError && reason.status === 401)) {
+          setAdminAuthError(reason instanceof Error ? reason.message : 'No se pudo verificar la sesión administrativa.')
+        }
+      } finally {
+        if (!cancelled) setAdminAuthReady(true)
       }
-      if (!cancelled) setCart(readGuestCart())
-    }).finally(() => {
-      if (!cancelled) setAuthReady(true)
-    })
+    }
+
+    void loadCustomerSession()
+    void loadAdminSession()
     return () => { cancelled = true }
   }, [refreshReservation])
 
@@ -153,9 +189,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         captcha_answer: captchaAnswer,
       }),
     })
-    setUser(signedInUser)
-    setCart(readGuestCart())
-    setReservation(null)
+    setAdminUser(signedInUser)
+    setAdminAuthError(null)
+    setAdminAuthReady(true)
   }, [])
 
   const register = useCallback(async (name: string, email: string, password: string) => {
@@ -177,9 +213,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setReservation(null)
   }, [])
 
+  const adminSignOut = useCallback(async () => {
+    await apiRequest('/admin/auth/logout', { method: 'POST' })
+    setAdminUser(null)
+  }, [])
+
   const value = useMemo<StoreContextValue>(() => ({
     user,
+    adminUser,
     authReady,
+    adminAuthReady,
+    adminAuthError,
     cart,
     cartCount: cart.reduce((count, item) => count + item.quantity, 0),
     subtotal: cart.reduce((total, item) => total + Number(item.line_total), 0),
@@ -192,11 +236,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     removeItem,
     signIn,
     adminSignIn,
+    adminSignOut,
+    refreshAdminSession,
     register,
     signOut,
     refreshCart,
     refreshReservation,
-  }), [user, authReady, cart, error, reservation, reservationServerOffset, addToCart, setQuantity, removeItem, signIn, adminSignIn, register, signOut, refreshCart, refreshReservation])
+  }), [user, adminUser, authReady, adminAuthReady, adminAuthError, cart, error, reservation, reservationServerOffset, addToCart, setQuantity, removeItem, signIn, adminSignIn, adminSignOut, refreshAdminSession, register, signOut, refreshCart, refreshReservation])
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

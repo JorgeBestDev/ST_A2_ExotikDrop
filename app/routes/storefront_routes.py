@@ -1,7 +1,7 @@
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -117,7 +117,6 @@ def register():
     except IntegrityError:
         db.session.rollback()
         return jsonify(success=False, message='El email ya está registrado'), 409
-    session.pop('admin_authenticated', None)
     login_user(user)
     return jsonify(success=True, data=serialize_user(user)), 201
 
@@ -133,7 +132,6 @@ def login():
     user = User.query.filter_by(email=email.strip().lower(), is_active=True).first()
     if user is None or not check_password_hash(user.password_hash, password):
         return jsonify(success=False, message='Email o contraseña incorrectos'), 401
-    session.pop('admin_authenticated', None)
     login_user(user)
     return jsonify(success=True, data=serialize_user(user)), 200
 
@@ -142,7 +140,6 @@ def login():
 @login_required
 @rollback_on_error
 def logout():
-    session.pop('admin_authenticated', None)
     logout_user()
     return jsonify(success=True), 200
 

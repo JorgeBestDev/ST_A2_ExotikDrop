@@ -6,11 +6,11 @@ import secrets
 from uuid import uuid4
 from functools import wraps
 
-from flask import Blueprint, current_app, jsonify, request, session
-from flask_login import current_user, login_required, login_user, logout_user
+from flask import Blueprint, current_app, g, jsonify, request
 from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db
@@ -31,14 +31,31 @@ MAX_LOGIN_FAILURES = 5
 CAPTCHA_REQUEST_WINDOW = timedelta(minutes=1)
 MAX_CAPTCHA_REQUESTS = 20
 ALLOWED_DROP_STATUSES = {'scheduled', 'active', 'ended', 'cancelled'}
+ADMIN_SESSION_COOKIE = 'exitdrop_admin_session'
+ADMIN_SESSION_MAX_AGE = 8 * 60 * 60
+
+
+def admin_session_serializer():
+    return URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='exitdrop-admin-session-v1')
 
 
 def admin_required(view):
     @wraps(view)
-    @login_required
     def wrapped(*args, **kwargs):
-        if not current_user.is_admin or not session.get('admin_authenticated'):
+        token = request.cookies.get(ADMIN_SESSION_COOKIE)
+        if not token:
+            return jsonify(success=False, message='Debes iniciar sesión como administrador'), 401
+        try:
+            payload = admin_session_serializer().loads(token, max_age=ADMIN_SESSION_MAX_AGE)
+        except SignatureExpired:
+            return jsonify(success=False, message='La sesión administrativa expiró; inicia sesión nuevamente'), 401
+        except BadSignature:
+            return jsonify(success=False, message='La sesión administrativa no es válida; inicia sesión nuevamente'), 401
+        user_id = payload.get('user_id') if isinstance(payload, dict) else None
+        admin_user = db.session.get(User, user_id) if isinstance(user_id, int) else None
+        if admin_user is None or not admin_user.is_admin or not admin_user.is_active:
             return jsonify(success=False, message='No tienes permiso para acceder al panel administrativo'), 403
+        g.admin_user = admin_user
         return view(*args, **kwargs)
 
     return wrapped
@@ -202,25 +219,32 @@ def admin_login():
         return jsonify(success=False, message='Credenciales administrativas incorrectas'), 401
     AdminCaptchaChallenge.query.filter_by(client_fingerprint=fingerprint, login_failed=True).delete(synchronize_session=False)
     db.session.commit()
-    login_user(user)
-    session['admin_authenticated'] = True
-    session.permanent = True
-    return jsonify(success=True, data={
+    response = jsonify(success=True, data={
         'id': user.id,
         'email': user.email,
         'full_name': user.full_name,
         'is_admin': user.is_admin,
-    }), 200
+    })
+    response.set_cookie(
+        ADMIN_SESSION_COOKIE,
+        admin_session_serializer().dumps({'user_id': user.id}),
+        max_age=ADMIN_SESSION_MAX_AGE,
+        httponly=True,
+        secure=current_app.config['SESSION_COOKIE_SECURE'],
+        samesite=current_app.config['SESSION_COOKIE_SAMESITE'],
+        path='/api/admin',
+    )
+    return response, 200
 
 
 @bp.get('/auth/me')
 @admin_required
 def admin_me():
     return jsonify(success=True, data={
-        'id': current_user.id,
-        'email': current_user.email,
-        'full_name': current_user.full_name,
-        'is_admin': current_user.is_admin,
+        'id': g.admin_user.id,
+        'email': g.admin_user.email,
+        'full_name': g.admin_user.full_name,
+        'is_admin': g.admin_user.is_admin,
     }), 200
 
 
@@ -228,9 +252,15 @@ def admin_me():
 @admin_required
 @rollback_on_error
 def admin_logout():
-    logout_user()
-    session.pop('admin_authenticated', None)
-    return jsonify(success=True), 200
+    response = jsonify(success=True)
+    response.delete_cookie(
+        ADMIN_SESSION_COOKIE,
+        path='/api/admin',
+        secure=current_app.config['SESSION_COOKIE_SECURE'],
+        httponly=True,
+        samesite=current_app.config['SESSION_COOKIE_SAMESITE'],
+    )
+    return response, 200
 
 
 @bp.get('/dashboard')
@@ -383,7 +413,7 @@ def update_admin_user(user_id):
     if not isinstance(next_is_admin, bool) or not isinstance(next_is_active, bool):
         return jsonify(success=False, message='Los estados de cuenta deben ser booleanos'), 400
     if user.is_admin and user.is_active and not (next_is_admin and next_is_active):
-        if user.id == current_user.id or not has_another_active_admin(user.id):
+        if user.id == g.admin_user.id or not has_another_active_admin(user.id):
             return jsonify(success=False, message='No puedes desactivar o degradar al último administrador'), 409
 
     user.full_name = full_name.strip()
@@ -405,7 +435,7 @@ def deactivate_admin_user(user_id):
     user = db.session.get(User, user_id)
     if user is None:
         return jsonify(success=False, message='Usuario no encontrado'), 404
-    if user.is_admin and user.is_active and (user.id == current_user.id or not has_another_active_admin(user.id)):
+    if user.is_admin and user.is_active and (user.id == g.admin_user.id or not has_another_active_admin(user.id)):
         return jsonify(success=False, message='No puedes desactivar al último administrador'), 409
     user.is_active = False
     db.session.commit()
